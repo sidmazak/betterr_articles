@@ -1,65 +1,84 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Card, CardContent } from "@/components/ui/card";
+import { ArrowRight, Globe, Calendar, FileText, Network } from "lucide-react";
+import type { Project } from "@/lib/db";
+
+export type ProjectWithStats = Project & {
+  crawl_jobs_count?: number;
+  calendar_items_count?: number;
+  pages_count?: number;
+};
 
 export default function Home() {
+  const [projects, setProjects] = useState<ProjectWithStats[]>([]);
+
+  useEffect(() => {
+    fetch("/api/projects")
+      .then((r) => r.json())
+      .then(setProjects)
+      .catch(() => setProjects([]));
+  }, []);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="w-full px-4 py-8 lg:px-8">
+      <div className="mx-auto w-full max-w-[1600px]">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold tracking-tight">Projects</h1>
+          <p className="mt-1 text-muted-foreground">
+            Create a project to start. Each project has its own crawl data, content calendar, and articles.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+
+        {projects.length > 0 ? (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {projects.map((p) => (
+              <Link key={p.id} href={`/projects/${p.id}`}>
+                <Card className="h-full transition-colors hover:border-primary/50 hover:bg-muted/30">
+                  <CardContent className="flex items-start justify-between gap-4 p-4">
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <p className="font-medium truncate">{p.name}</p>
+                      {p.homepage_url && (
+                        <p className="flex items-center gap-1.5 text-sm text-muted-foreground truncate">
+                          <Globe className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{p.homepage_url}</span>
+                        </p>
+                      )}
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1">
+                          <Network className="h-3 w-3" />
+                          {p.crawl_jobs_count ?? 0} crawls
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Calendar className="h-3 w-3" />
+                          {p.calendar_items_count ?? 0} calendar items
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <FileText className="h-3 w-3" />
+                          {p.pages_count ?? 0} pages
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Updated {p.updated_at ? new Date(p.updated_at).toLocaleDateString() : "—"}
+                      </p>
+                    </div>
+                    <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+                  </CardContent>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+              <p className="text-muted-foreground">No projects yet.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Use the New project button in the header to create one.</p>
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }
