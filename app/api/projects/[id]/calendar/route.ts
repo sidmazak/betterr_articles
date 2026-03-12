@@ -2,16 +2,83 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProject } from "@/lib/db/projects";
 import {
   listCalendarItems,
-  createCalendarItems,
-  deleteCalendarItemsByProject,
+  updateCalendarItem,
+  getCalendarItem,
 } from "@/lib/db/calendar";
+import { createCalendarGenerationJob } from "@/lib/db/calendar-generation-jobs";
 import { getDb } from "@/lib/db";
 import { getLatestCrawlResults } from "@/lib/db/crawl-jobs";
 import { listManualUrls } from "@/lib/db/manual-urls";
-import { buildContentCalendarPrompt } from "@/lib/prompts";
-import { chat } from "@/lib/llm";
-import { sendNotification } from "@/lib/notifications";
+import { getLatestProjectSEOInsight, parseSEOInsight } from "@/lib/db/seo-insights";
+import { getStructuredPromptInstruction } from "@/lib/prompts/toon";
 import type { CalendarItem } from "@/lib/app-types";
+import type { CalendarItemRow } from "@/lib/db";
+import { parseCalendarItemsFromLlmContent } from "@/lib/calendar-generation-parser";
+
+type CalendarUniquenessItem = {
+  title?: string;
+  primaryKeyword?: string;
+  targetUrl?: string;
+};
+
+function listProjectInternalLinks(projectId: string) {
+  const db = getDb();
+  return db
+    .prepare("SELECT url, title FROM project_internal_links WHERE project_id = ? ORDER BY created_at DESC")
+    .all(projectId) as Array<{ url: string; title: string | null }>;
+}
+
+function sanitizeInternalLinkTargets(
+  value: CalendarItem["internalLinkTargets"] | undefined,
+  allowedLinks: Array<{ url: string; title: string | null }>
+) {
+  const allowedByUrl = new Map(
+    allowedLinks.map((link) => [link.url.trim().toLowerCase(), { url: link.url, title: link.title ?? link.url }])
+  );
+  return (value ?? [])
+    .map((entry) => {
+      const url = typeof entry === "string" ? entry : entry?.url;
+      if (!url) return null;
+      const allowed = allowedByUrl.get(url.trim().toLowerCase());
+      if (!allowed) return null;
+      return {
+        url: allowed.url,
+        title:
+          typeof entry !== "string" && entry?.title?.trim()
+            ? entry.title.trim()
+            : allowed.title,
+        reason:
+          typeof entry !== "string" && entry?.reason?.trim()
+            ? entry.reason.trim()
+            : "Relevant internal page provided in project settings.",
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+}
+
+function formatDateOnly(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function logCalendarApi(
+  level: "info" | "warn" | "error",
+  message: string,
+  details?: Record<string, unknown>
+) {
+  if (process.env.NODE_ENV === "test") return;
+  const payload = details ? ` ${JSON.stringify(details)}` : "";
+  const formatted = `[CalendarAPI] [${level.toUpperCase()}] ${message}${payload}`;
+  if (level === "error") {
+    console.error(formatted);
+  } else if (level === "warn") {
+    console.warn(formatted);
+  } else {
+    console.log(formatted);
+  }
+}
 
 export async function GET(
   _request: NextRequest,
@@ -63,130 +130,329 @@ export async function POST(
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
-    const crawlPages = getLatestCrawlResults(projectId);
-    const manualUrls = listManualUrls(projectId);
-    const manualPages = manualUrls.map((u) => ({ url: u.url, title: u.title ?? u.url }));
+    const body = await request.json().catch(() => ({}));
+    const {
+      suggestionCount = 12,
+      replace = false,
+      wholeMonth = false,
+      append = false,
+      startDate,
+      endDate,
+      feedback,
+      itemId,
+    } = body;
 
-    const existingPages = crawlPages.length > 0 ? crawlPages : manualPages;
-    if (existingPages.length === 0) {
+    logCalendarApi("info", "Calendar API request received", {
+      projectId,
+      mode: itemId ? "regenerate-single" : "create-job",
+      suggestionCount,
+      replace,
+      wholeMonth,
+      append,
+      startDate: startDate ?? null,
+      endDate: endDate ?? null,
+      hasFeedback: !!feedback,
+      itemId: itemId ?? null,
+    });
+
+    const today = new Date();
+    const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    const nextMonthEnd = new Date(today.getFullYear(), today.getMonth() + 2, 0);
+    const todayValue = formatDateOnly(today);
+    const monthEndValue = formatDateOnly(monthEnd);
+    const nextMonthEndValue = formatDateOnly(nextMonthEnd);
+
+    const resolvedStart = startDate ?? todayValue;
+    const resolvedEnd = endDate ?? (append ? nextMonthEndValue : monthEndValue);
+
+    if (resolvedStart < todayValue || resolvedEnd < todayValue) {
       return NextResponse.json(
-        { error: "No pages found. Run a crawl or add manual URLs first." },
+        { error: "Article scheduling can only start from today or a future date." },
         { status: 400 }
       );
     }
 
-    const body = await request.json().catch(() => ({}));
-    const {
-      suggestionCount = 12,
-      publishingFrequency = "2 per week",
-      replace = false,
-      simulate = false,
-    } = body;
-
-    if (simulate) {
-      const mockItems = generateMockCalendar(existingPages, suggestionCount);
-      if (replace) {
-        deleteCalendarItemsByProject(projectId);
-      }
-      const created = createCalendarItems(projectId, null, mockItems);
-      return NextResponse.json(created);
+    if (resolvedStart > resolvedEnd) {
+      return NextResponse.json(
+        { error: "Start date must be before or equal to the end date." },
+        { status: 400 }
+      );
     }
 
-    const homepageUrl = project.homepage_url ?? existingPages[0]?.url ?? "";
-    const prompt = buildContentCalendarPrompt({
-      homepageUrl,
-      existingPages,
-      usedSitemap: false,
-      suggestionCount,
-      publishingFrequency,
+    const effectiveCount = wholeMonth
+      ? Math.min(
+          Math.ceil((new Date(resolvedEnd).getTime() - new Date(resolvedStart).getTime()) / (24 * 60 * 60 * 1000)) + 1,
+          31
+        )
+      : suggestionCount;
+
+    if (itemId) {
+      const crawlPages = getLatestCrawlResults(projectId);
+      const manualUrls = listManualUrls(projectId);
+      const manualPages = manualUrls.map((u) => ({ url: u.url, title: u.title ?? u.url }));
+      const existingPages = crawlPages.length > 0 ? crawlPages : manualPages;
+      if (existingPages.length === 0) {
+        return NextResponse.json(
+          { error: "No pages found. Run a crawl or add manual URLs first." },
+          { status: 400 }
+        );
+      }
+      const existing = getCalendarItem(itemId);
+      if (!existing || existing.project_id !== projectId) {
+        logCalendarApi("warn", "Calendar item not found for regeneration", {
+          projectId,
+          itemId,
+        });
+        return NextResponse.json({ error: "Calendar item not found" }, { status: 404 });
+      }
+      logCalendarApi("info", "Starting single calendar item regeneration", {
+        projectId,
+        itemId,
+        title: existing.title,
+        primaryKeyword: existing.primary_keyword,
+        availablePages: existingPages.length,
+      });
+      const singleItem = await regenerateSingleItem(projectId, existing, existingPages, feedback);
+      if (singleItem) {
+        logCalendarApi("info", "Single calendar item regenerated successfully", {
+          projectId,
+          itemId,
+          title: singleItem.title,
+          primaryKeyword: singleItem.primary_keyword,
+        });
+        return NextResponse.json([singleItem]);
+      }
+      logCalendarApi("warn", "Single calendar item regeneration returned no usable result", {
+        projectId,
+        itemId,
+      });
+      return NextResponse.json({ error: "Failed to regenerate item" }, { status: 503 });
+    }
+    const job = createCalendarGenerationJob(projectId, {
+      replaceExisting: append ? false : replace,
+      appendExisting: append,
+      wholeMonth,
+      suggestionCount: wholeMonth ? effectiveCount : suggestionCount,
+      startDate: resolvedStart,
+      endDate: resolvedEnd,
+      feedback: feedback ?? null,
     });
 
-    let content: string;
-    try {
-      const result = await chat(
-        [
-          {
-            role: "system",
-            content: "You are a content strategist. Output only valid JSON arrays. No markdown, no explanation.",
-          },
-          { role: "user", content: prompt },
-        ],
-        undefined
-      );
-      content = result.content?.trim() ?? "[]";
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "LLM error";
-      return NextResponse.json(
-        {
-          error: msg,
-          mockData: generateMockCalendar(existingPages, suggestionCount),
-        },
-        { status: 503 }
-      );
-    }
+    logCalendarApi("info", "Calendar generation job created", {
+      projectId,
+      jobId: job.id,
+      replaceExisting: !!job.replace_existing,
+      appendExisting: !!job.append_existing,
+      wholeMonth: !!job.whole_month,
+      suggestionCount: job.suggestion_count,
+      startDate: job.start_date,
+      endDate: job.end_date,
+    });
 
-    let items: CalendarItem[];
-    try {
-      const parsed = JSON.parse(content.replace(/^```json\s*|\s*```$/g, ""));
-      items = Array.isArray(parsed) ? parsed : [];
-      // Ensure each item has targetUrl from existing pages
-      items = items.map((item, idx) => {
-        const target = item.targetUrl && existingPages.some((p) => p.url === item.targetUrl)
-          ? item.targetUrl
-          : existingPages[idx % existingPages.length]?.url ?? existingPages[0]?.url ?? "";
-        return { ...item, targetUrl: target };
-      });
-    } catch {
-      return NextResponse.json(
-        { error: "Failed to parse LLM response as JSON" },
-        { status: 502 }
-      );
-    }
-
-    if (replace) {
-      deleteCalendarItemsByProject(projectId);
-    }
-
-    const created = createCalendarItems(projectId, null, items);
-    sendNotification(
-      "calendar_generated",
-      "Content calendar generated",
-      `Generated ${created.length} article suggestions for your project.`,
-      project.name
-    ).catch(() => {});
-    return NextResponse.json(created);
+    return NextResponse.json(job, { status: 202 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to generate calendar";
+    logCalendarApi("error", "Calendar API request failed", {
+      error: message,
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
-function generateMockCalendar(
+async function regenerateSingleItem(
+  projectId: string,
+  existing: { id: string; title: string; primary_keyword: string; target_url: string | null; secondary_keywords: string | null },
   existingPages: { url: string; title: string }[],
-  count: number
-): CalendarItem[] {
-  const today = new Date();
-  const items: CalendarItem[] = [];
-  for (let i = 0; i < Math.min(count, Math.max(6, existingPages.length)); i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() + i * 3);
-    const targetPage = existingPages[i % existingPages.length];
-    items.push({
-      targetUrl: targetPage.url,
-      title: `Suggested Article ${i + 1} (Configure LLM in Settings for real suggestions)`,
-      primaryKeyword: `keyword-${i + 1}`,
-      secondaryKeywords: ["kw-a", "kw-b", "kw-c"],
-      suggestedDate: d.toISOString().split("T")[0],
-      contentGapRationale: "Go to Settings to add your API key and choose a model provider.",
-      internalLinkTargets: existingPages.slice(0, 3).map((p) => ({
-        url: p.url,
-        title: p.title,
-        reason: "Related topic",
-      })),
-      infographicConcepts: ["Concept 1", "Concept 2", "Concept 3"],
-      rankingPotential: "medium",
-      rankingJustification: "Mock data",
+  feedback?: string
+): Promise<CalendarItemRow | null> {
+  const { chat } = await import("@/lib/llm");
+  const { buildContentCalendarPrompt } = await import("@/lib/prompts");
+  const db = getDb();
+  const internalLinks = listProjectInternalLinks(projectId);
+  const keywords = db
+    .prepare(`SELECT keyword FROM project_keywords WHERE project_id = ? ORDER BY created_at DESC LIMIT 50`)
+    .all(projectId) as { keyword: string }[];
+  const seoInsight = parseSEOInsight(getLatestProjectSEOInsight(projectId));
+  const homepageUrl = existingPages[0]?.url ?? "";
+  const publishedForPrompt = listPublishedArticleUniquenessItems(projectId).filter(
+    (item) =>
+      normalizeTitle(item.title) !== normalizeTitle(existing.title) &&
+      normalizeKeyword(item.primaryKeyword) !== normalizeKeyword(existing.primary_keyword)
+  );
+  const internalLinksAsPages: { url: string; title: string }[] = internalLinks.map((l) => ({
+    url: l.url,
+    title: l.title ?? l.url,
+  }));
+  const prompt = buildContentCalendarPrompt({
+    homepageUrl,
+    existingPages,
+    internalLinks: internalLinksAsPages,
+    usedSitemap: false,
+    suggestionCount: 1,
+    extractedKeywords: keywords.map((row) => row.keyword),
+    seoReference: seoInsight
+      ? {
+          summary: seoInsight.summary,
+          topics: seoInsight.topics,
+          questions: seoInsight.reference.questions,
+          painPoints: seoInsight.reference.painPoints,
+          contentAngles: seoInsight.reference.contentAngles,
+          productsServices: seoInsight.reference.productsServices,
+        }
+      : undefined,
+    userFeedback: feedback ?? `Regenerate a single replacement for: "${existing.title}" (keyword: ${existing.primary_keyword}). Keep it unique and valuable.`,
+    existingItems: [{ title: existing.title, primaryKeyword: existing.primary_keyword }],
+    publishedItems: publishedForPrompt.length > 0 ? publishedForPrompt : undefined,
+  });
+  logCalendarApi("info", "Built single-item regeneration prompt", {
+    projectId,
+    itemId: existing.id,
+    promptLength: prompt.length,
+    promptPreview: prompt.slice(0, 500),
+    publishedItems: publishedForPrompt.length,
+    availablePages: existingPages.length,
+    internalLinks: internalLinks.length,
+  });
+  const result = await chat(
+    [
+      {
+        role: "system",
+        content:
+          `You are a senior content strategist. Follow the prompt exactly, keep suggestions unique and practical, and return only a bare JSON array. Never return an error object or explanatory note. ${getStructuredPromptInstruction()}`,
+      },
+      { role: "user", content: prompt },
+    ],
+    undefined,
+    {
+      projectId,
+      requestLabel: "calendar-regenerate-single",
+      temperature: 0.2,
+      maxOutputTokens: null,
+      responseFormat: "text",
+    }
+  );
+  const content = result.content?.trim() ?? "[]";
+  logCalendarApi("info", "Received single-item regeneration response", {
+    projectId,
+    itemId: existing.id,
+    responseLength: content.length,
+    responsePreview: content.slice(0, 500),
+  });
+  let parsed: CalendarItem[];
+  try {
+    parsed = parseCalendarItemsFromLlmContent(content).items;
+    logCalendarApi("info", "Parsed single-item regeneration response", {
+      projectId,
+      itemId: existing.id,
+      parsedItems: parsed.length,
     });
+  } catch (error) {
+    logCalendarApi("error", "Failed to parse single-item regeneration response", {
+      projectId,
+      itemId: existing.id,
+      error: error instanceof Error ? error.message : String(error),
+      responsePreview: content.slice(0, 500),
+    });
+    return null;
   }
-  return items;
+  const item = parsed[0];
+  if (!item) return null;
+  const filtered = filterUniqueCalendarItems(parsed, [
+    { title: existing.title, primaryKeyword: existing.primary_keyword, targetUrl: existing.target_url ?? undefined },
+    ...publishedForPrompt,
+  ]);
+  const uniqueItem = filtered[0];
+  if (!uniqueItem) {
+    logCalendarApi("warn", "No unique single-item regeneration candidate remained", {
+      projectId,
+      itemId: existing.id,
+      parsedItems: parsed.length,
+      publishedItems: publishedForPrompt.length,
+    });
+    return null;
+  }
+  const updated = updateCalendarItem(existing.id, {
+    title: uniqueItem.title,
+    primary_keyword: uniqueItem.primaryKeyword,
+    secondary_keywords: uniqueItem.secondaryKeywords ? JSON.stringify(uniqueItem.secondaryKeywords) : null,
+    target_url: null,
+    content_gap_rationale: uniqueItem.contentGapRationale ?? null,
+    internal_link_targets: JSON.stringify(
+      sanitizeInternalLinkTargets(uniqueItem.internalLinkTargets, internalLinks)
+    ),
+    infographic_concepts: uniqueItem.infographicConcepts ? JSON.stringify(uniqueItem.infographicConcepts) : null,
+    ranking_potential: uniqueItem.rankingPotential ?? null,
+    ranking_justification: uniqueItem.rankingJustification ?? null,
+  });
+  return updated;
+}
+
+function listPublishedArticleUniquenessItems(projectId: string): CalendarUniquenessItem[] {
+  const db = getDb();
+  const rows = db.prepare(
+    `SELECT a.title, c.primary_keyword, c.target_url
+     FROM articles a
+     LEFT JOIN calendar_items c ON a.calendar_item_id = c.id
+     WHERE a.project_id = ? AND a.status = 'published'`
+  ).all(projectId) as Array<{
+    title: string | null;
+    primary_keyword: string | null;
+    target_url: string | null;
+  }>;
+
+  return rows.map((row) => ({
+    title: row.title ?? undefined,
+    primaryKeyword: row.primary_keyword ?? undefined,
+    targetUrl: row.target_url ?? undefined,
+  }));
+}
+
+function filterUniqueCalendarItems(
+  items: CalendarItem[],
+  existingItems: CalendarUniquenessItem[]
+): CalendarItem[] {
+  const seenTitles = new Set(existingItems.map((item) => normalizeTitle(item.title)).filter(Boolean));
+  const seenKeywords = new Set(existingItems.map((item) => normalizeKeyword(item.primaryKeyword)).filter(Boolean));
+  const seenTargetKeywordPairs = new Set(
+    existingItems
+      .map((item) => buildTargetKeywordKey(item.targetUrl, item.primaryKeyword))
+      .filter(Boolean)
+  );
+
+  const uniqueItems: CalendarItem[] = [];
+  for (const item of items) {
+    const normalizedTitle = normalizeTitle(item.title);
+    const normalizedKeyword = normalizeKeyword(item.primaryKeyword);
+    const targetKeywordKey = buildTargetKeywordKey(item.targetUrl, item.primaryKeyword);
+
+    if (
+      (normalizedTitle && seenTitles.has(normalizedTitle)) ||
+      (normalizedKeyword && seenKeywords.has(normalizedKeyword)) ||
+      (targetKeywordKey && seenTargetKeywordPairs.has(targetKeywordKey))
+    ) {
+      continue;
+    }
+
+    uniqueItems.push(item);
+    if (normalizedTitle) seenTitles.add(normalizedTitle);
+    if (normalizedKeyword) seenKeywords.add(normalizedKeyword);
+    if (targetKeywordKey) seenTargetKeywordPairs.add(targetKeywordKey);
+  }
+
+  return uniqueItems;
+}
+
+function normalizeTitle(value?: string | null) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function normalizeKeyword(value?: string | null) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function buildTargetKeywordKey(targetUrl?: string | null, keyword?: string | null) {
+  const normalizedTarget = targetUrl?.trim().toLowerCase();
+  const normalizedKeyword = normalizeKeyword(keyword);
+  if (!normalizedTarget || !normalizedKeyword) return "";
+  return `${normalizedTarget}::${normalizedKeyword}`;
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Dialog,
@@ -24,11 +25,26 @@ export function NewProjectModal({ open, onOpenChange }: NewProjectModalProps) {
   const [name, setName] = useState("");
   const [homepageUrl, setHomepageUrl] = useState("");
   const [loading, setLoading] = useState(false);
+  const [llmConfigured, setLlmConfigured] = useState<boolean | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    fetch("/api/settings/llm")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setLlmConfigured(!!data?.default?.is_configured))
+      .catch(() => setLlmConfigured(false));
+  }, [open]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
+    if (llmConfigured === false) {
+      setError("Configure AI first. At least one API key provider and model is required before creating a site.");
+      return;
+    }
     setLoading(true);
+    setError("");
     try {
       const res = await fetch("/api/projects", {
         method: "POST",
@@ -36,12 +52,17 @@ export function NewProjectModal({ open, onOpenChange }: NewProjectModalProps) {
         body: JSON.stringify({ name, homepageUrl: homepageUrl || undefined }),
       });
       const project = await res.json();
+      if (!res.ok) {
+        throw new Error(project.error || "Failed to create site");
+      }
       if (project.id) {
         setName("");
         setHomepageUrl("");
         onOpenChange(false);
         router.push(`/projects/${project.id}`);
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create site");
     } finally {
       setLoading(false);
     }
@@ -51,6 +72,7 @@ export function NewProjectModal({ open, onOpenChange }: NewProjectModalProps) {
     if (!next) {
       setName("");
       setHomepageUrl("");
+      setError("");
     }
     onOpenChange(next);
   }
@@ -59,14 +81,29 @@ export function NewProjectModal({ open, onOpenChange }: NewProjectModalProps) {
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New project</DialogTitle>
+          <DialogTitle>Add Site</DialogTitle>
           <DialogDescription>
-            Add a project with an optional homepage URL for crawling.
+            Add a website to manage. Crawl for SEO data, extract search terms, and plan content.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {llmConfigured === false && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+              Configure AI first. At least one provider API key and model is required before creating a site.
+              {" "}
+              <Link href="/settings?tab=llm" className="font-medium underline underline-offset-2">
+                Open settings
+              </Link>
+              .
+            </div>
+          )}
+          {error && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              {error}
+            </div>
+          )}
           <div className="space-y-2">
-            <Label htmlFor="modal-name">Project name</Label>
+            <Label htmlFor="modal-name">Site name</Label>
             <Input
               id="modal-name"
               value={name}
@@ -89,7 +126,7 @@ export function NewProjectModal({ open, onOpenChange }: NewProjectModalProps) {
             <Button variant="outline" type="button" onClick={() => handleOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={loading}>
+            <Button type="submit" disabled={loading || llmConfigured === false}>
               {loading ? "Creating..." : "Create"}
             </Button>
           </DialogFooter>

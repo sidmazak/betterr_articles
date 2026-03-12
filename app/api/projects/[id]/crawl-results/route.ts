@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProject } from "@/lib/db/projects";
 import {
+  getLatestCompletedCrawlJob,
   getLatestCrawlResults,
   getCrawlResults,
+  getCrawlResultPages,
 } from "@/lib/db/crawl-jobs";
 import { listManualUrls } from "@/lib/db/manual-urls";
 
@@ -21,10 +23,26 @@ export async function GET(
     const jobId = searchParams.get("jobId");
 
     let pages: { url: string; title: string }[];
+    let detailedPages: Array<{ id: string; crawl_job_id: string; url: string; title: string | null }> = [];
     if (jobId) {
       pages = getCrawlResults(jobId);
+      detailedPages = getCrawlResultPages(jobId).map((page) => ({
+        id: page.id,
+        crawl_job_id: page.crawl_job_id,
+        url: page.url,
+        title: page.title,
+      }));
     } else {
       pages = getLatestCrawlResults(projectId);
+      const latestJob = getLatestCompletedCrawlJob(projectId);
+      if (latestJob) {
+        detailedPages = getCrawlResultPages(latestJob.id).map((page) => ({
+          id: page.id,
+          crawl_job_id: page.crawl_job_id,
+          url: page.url,
+          title: page.title,
+        }));
+      }
     }
 
     const manualUrls = listManualUrls(projectId);
@@ -35,6 +53,7 @@ export async function GET(
 
     return NextResponse.json({
       pages: allPages,
+      detailedPages,
       source: pages.length > 0 ? "crawl" : manualPages.length > 0 ? "manual" : "none",
     });
   } catch (err) {

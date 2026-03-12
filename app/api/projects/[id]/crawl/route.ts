@@ -2,15 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProject } from "@/lib/db/projects";
 import {
   createCrawlJob,
-  startCrawlJob,
-  completeCrawlJob,
-  failCrawlJob,
-  saveCrawlResults,
   getCrawlJob,
-  addCrawlLog,
 } from "@/lib/db/crawl-jobs";
-import { crawlWebsite } from "@/lib/crawler";
-import { sendNotification } from "@/lib/notifications";
+import { hasConfiguredDefaultLLM } from "@/lib/db/settings";
+import { processCrawlJob } from "@/lib/crawl-job-runner";
 
 export async function POST(
   request: NextRequest,
@@ -23,45 +18,28 @@ export async function POST(
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
+    if (!hasConfiguredDefaultLLM()) {
+      return NextResponse.json(
+        {
+          error:
+            "AI provider not configured. Go to App Settings → LLM Provider to add your API key and model before crawling.",
+        },
+        { status: 400 }
+      );
+    }
+
     const body = await request.json().catch(() => ({}));
-    const { runImmediately = true, maxPages = 150 } = body;
+    const { runImmediately = true, maxPages = 10 } = body;
 
     const job = createCrawlJob(projectId, "auto", maxPages);
 
     if (runImmediately && project.homepage_url) {
-      startCrawlJob(job.id);
-      addCrawlLog(job.id, "info", `Starting crawl of ${project.homepage_url}`);
-      try {
-        const result = await crawlWebsite(
-          project.homepage_url,
-          (progress, total) => {
-            // Progress could be stored for polling - for sync response we skip
-          },
-          { maxPages }
-        );
-        saveCrawlResults(job.id, projectId, result.pages);
-        addCrawlLog(
-          job.id,
-          "info",
-          `Crawl completed: found ${result.totalFound} pages (sitemap: ${result.usedSitemap})`
-        );
-        completeCrawlJob(job.id, result.totalFound, result.usedSitemap);
-        sendNotification(
-          "crawl_complete",
-          "Crawl finished",
-          `Found ${result.totalFound} pages. Used sitemap: ${result.usedSitemap}.`,
-          project.name
-        ).catch(() => {});
-        return NextResponse.json({
-          ...getCrawlJob(job.id),
-          pages: result.pages,
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Crawl failed";
-        addCrawlLog(job.id, "error", msg);
-        failCrawlJob(job.id, msg);
-        return NextResponse.json({ error: msg, jobId: job.id }, { status: 500 });
+      const processed = await processCrawlJob(job.id);
+      const finalJob = getCrawlJob(job.id);
+      if (processed?.status === "failed") {
+        return NextResponse.json({ error: finalJob?.error_message ?? "Crawl failed", jobId: job.id }, { status: 500 });
       }
+      return NextResponse.json(finalJob);
     }
 
     return NextResponse.json(job);

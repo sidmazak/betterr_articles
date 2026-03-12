@@ -26,6 +26,8 @@ export type ProjectStats = {
   crawl_jobs_count: number;
   calendar_items_count: number;
   pages_count: number;
+  keywords_count: number;
+  articles_count: number;
 };
 
 export function getProjectStats(projectId: string): ProjectStats {
@@ -35,14 +37,21 @@ export function getProjectStats(projectId: string): ProjectStats {
   const pages = db.prepare(
     "SELECT COUNT(*) as c FROM crawl_result_pages WHERE project_id = ?"
   ).get(projectId) as { c: number };
+  const keywords = db.prepare("SELECT COUNT(*) as c FROM project_keywords WHERE project_id = ?").get(projectId) as { c: number };
+  const articles = db.prepare("SELECT COUNT(*) as c FROM articles WHERE project_id = ?").get(projectId) as { c: number };
   return {
     crawl_jobs_count: crawlJobs?.c ?? 0,
     calendar_items_count: calendarItems?.c ?? 0,
     pages_count: pages?.c ?? 0,
+    keywords_count: keywords?.c ?? 0,
+    articles_count: articles?.c ?? 0,
   };
 }
 
-export function updateProject(id: string, updates: { name?: string; homepage_url?: string }): void {
+export function updateProject(
+  id: string,
+  updates: { name?: string; homepage_url?: string; sitemap_url?: string }
+): void {
   const db = getDb();
   const now = new Date().toISOString();
   if (updates.name !== undefined) {
@@ -51,6 +60,13 @@ export function updateProject(id: string, updates: { name?: string; homepage_url
   if (updates.homepage_url !== undefined) {
     db.prepare("UPDATE projects SET homepage_url = ?, updated_at = ? WHERE id = ?").run(
       updates.homepage_url,
+      now,
+      id
+    );
+  }
+  if (updates.sitemap_url !== undefined) {
+    db.prepare("UPDATE projects SET sitemap_url = ?, updated_at = ? WHERE id = ?").run(
+      updates.sitemap_url,
       now,
       id
     );

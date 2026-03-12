@@ -2,17 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProject } from "@/lib/db/projects";
 import {
   getPendingCrawlJobs,
-  getCrawlJob,
-  startCrawlJob,
-  completeCrawlJob,
   failCrawlJob,
-  saveCrawlResults,
   addCrawlLog,
 } from "@/lib/db/crawl-jobs";
-import { crawlWebsite } from "@/lib/crawler";
+import { getDueCalendarItems } from "@/lib/db/calendar";
+import { getProjectsDueForArticleSchedule, markScheduleRun } from "@/lib/db/article-schedule";
+import { generateArticleForCalendarItem } from "@/lib/article-generator";
+import { processCrawlJob } from "@/lib/crawl-job-runner";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
@@ -26,6 +25,51 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // 1. Process article schedules (all due calendar items per project)
+    const { addCronLog } = await import("@/lib/db/cron-logs");
+    const scheduleProjects = getProjectsDueForArticleSchedule();
+    for (const p of scheduleProjects) {
+      const dueItems = getDueCalendarItems(p.project_id);
+      if (dueItems.length === 0) {
+        markScheduleRun(p.project_id);
+        addCronLog("article_schedule", "No due articles to generate", { projectId: p.project_id });
+        continue;
+      }
+      addCronLog("article_schedule", `Processing ${dueItems.length} due article(s)`, {
+        projectId: p.project_id,
+        details: { count: dueItems.length },
+      });
+      let succeeded = 0;
+      for (const item of dueItems) {
+        const result = await generateArticleForCalendarItem(p.project_id, item.id, item);
+        if (result.success) {
+          succeeded++;
+          addCronLog("article_schedule", `Generated: ${item.title}`, {
+            projectId: p.project_id,
+            jobId: result.jobId ?? item.id,
+            status: "success",
+          });
+        } else {
+          addCronLog("article_schedule", `Failed: ${item.title} - ${result.error}`, {
+            projectId: p.project_id,
+            jobId: result.jobId ?? item.id,
+            status: "error",
+            details: { error: result.error },
+          });
+        }
+      }
+      markScheduleRun(p.project_id);
+      return NextResponse.json({
+        processed: dueItems.length,
+        type: "article",
+        projectId: p.project_id,
+        succeeded,
+        failed: dueItems.length - succeeded,
+        status: "completed",
+      });
+    }
+
+    // 2. Process pending crawl jobs
     const pending = getPendingCrawlJobs();
     if (pending.length === 0) {
       return NextResponse.json({ processed: 0, message: "No pending jobs" });
@@ -39,22 +83,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ processed: 1, jobId: job.id, status: "failed" });
     }
 
-    startCrawlJob(job.id);
-    addCrawlLog(job.id, "info", `Starting crawl of ${project.homepage_url}`);
     try {
-      const result = await crawlWebsite(project.homepage_url);
-      saveCrawlResults(job.id, job.project_id, result.pages);
-      addCrawlLog(
-        job.id,
-        "info",
-        `Crawl completed: found ${result.totalFound} pages (sitemap: ${result.usedSitemap})`
-      );
-      completeCrawlJob(job.id, result.totalFound, result.usedSitemap);
+      const result = await processCrawlJob(job.id);
       return NextResponse.json({
         processed: 1,
         jobId: job.id,
-        status: "completed",
-        totalFound: result.totalFound,
+        status: result?.status ?? "completed",
+        totalFound: result?.total_found ?? 0,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Crawl failed";

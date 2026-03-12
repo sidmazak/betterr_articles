@@ -30,7 +30,8 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const updates: { title?: string; meta_description?: string; content_preview?: string } = {};
+    const updates: { url?: string; title?: string; meta_description?: string; content_preview?: string } = {};
+    if (typeof body.url === "string") updates.url = body.url.trim();
     if (typeof body.title === "string") updates.title = body.title;
     if (typeof body.meta_description === "string") updates.meta_description = body.meta_description;
     if (typeof body.content_preview === "string") updates.content_preview = body.content_preview;

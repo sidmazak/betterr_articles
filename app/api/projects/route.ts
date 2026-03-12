@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createProject, listProjects, getProjectStats } from "@/lib/db/projects";
+import { hasConfiguredDefaultLLM } from "@/lib/db/settings";
 
 export async function GET() {
   try {
@@ -22,6 +23,16 @@ export async function POST(request: NextRequest) {
 
     if (!name || typeof name !== "string") {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
+    }
+
+    if (!hasConfiguredDefaultLLM()) {
+      return NextResponse.json(
+        {
+          error:
+            "Configure AI first. At least one provider API key and model is required before creating a site.",
+        },
+        { status: 400 }
+      );
     }
 
     const project = createProject(name, homepageUrl);

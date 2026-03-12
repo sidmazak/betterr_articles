@@ -1,95 +1,88 @@
 import type { ResearchPromptParams } from "./types";
+import {
+  getStructuredPromptInstruction,
+  serializeStructuredPromptBlock,
+} from "./toon";
+import { SEO_RULES_PROMPT_BLOCK } from "@/lib/seo-rules";
 
 export function buildResearchPrompt(body: ResearchPromptParams): string {
+  const currentDate = new Date().toISOString().slice(0, 10);
+  const currentYear = new Date().getUTCFullYear();
   const articleTypeNote = body.articleType
-    ? `\n- **Article Type**: ${body.articleType} (adapt research structure accordingly)`
+    ? `\n- Article type: ${body.articleType}`
     : "";
   const intentNote = body.contentIntent
-    ? `\n- **Content Intent**: ${body.contentIntent}`
+    ? `\n- Content intent: ${body.contentIntent}`
     : "";
+  const contextBlock = serializeStructuredPromptBlock("Research context", {
+    topic: body.keyword,
+    contextDate: currentDate,
+    contextYear: currentYear,
+    sourceUrl: body.url ?? null,
+    category: body.category,
+    geoFocus: body.geoFocus,
+    audience: body.targetAudience,
+    articleType: body.articleType ?? null,
+    contentIntent: body.contentIntent ?? null,
+    freshnessPreference: body.contentFreshness ?? "Current, reliable information",
+    includeTrendingTopics: body.includeTrendingTopics ?? false,
+    domainKnowledge: body.domainKnowledge?.trim() || null,
+  });
 
-  return `# Comprehensive Research & Strategic Topic Analysis
+  return `# Research Brief
 
-## Executive Brief
-You are tasked with conducting an exhaustive research and analysis initiative for a high-impact content development project. This research will serve as the foundational intelligence for creating authoritative, data-driven content.
+Produce a professional markdown research brief that supports high-quality article creation.
 
-**Domain-Agnostic Scope**: This research applies to ANY domain or industry—entertainment, technology, finance, healthcare, lifestyle, news, B2B, B2C, or any other vertical. Adapt your methodology, sources, and framing to match the specific domain (${body.category}). Do not assume a particular industry; let the category and keyword guide your approach.
+## Context
+${getStructuredPromptInstruction()}
+${contextBlock}${articleTypeNote}${intentNote}
+- Trending coverage: ${body.includeTrendingTopics ? "Include recent developments when materially relevant" : "Focus on durable, reliable insights"}
 
-## Primary Research Parameters
-- **Core Subject Matter**: "${body.keyword}"
-- **Source URL Reference**: ${body.url ?? "No primary URL specified - conduct independent research"}
-- **Content Vertical / Domain**: ${body.category}
-- **Geographic Market Focus**: ${body.geoFocus}
-- **Primary Target Demographic**: ${body.targetAudience}${articleTypeNote}${intentNote}
+## Non-negotiable requirements
+${body.customInstructions ? `- ${body.customInstructions}` : "- Stay factual, useful, and domain-appropriate"}
+- Avoid filler and generic commentary
+- Prioritize information that can directly improve content quality, relevance, and ranking potential
+- If uncertain, say so instead of inventing specifics
+- Treat years, dates, deadlines, fees, age thresholds, legal requirements, and policy timelines as facts that must be verified or explicitly marked uncertain.
+- Gather material that helps the final article satisfy these SEO rules:
+${SEO_RULES_PROMPT_BLOCK}
 
-## Research Methodology & Scope
-${body.includeTrendingTopics ? "**Trending Intelligence Required**: Conduct comprehensive analysis of current trending topics, viral discussions, emerging conversations, and real-time social sentiment analysis" : "**Standard Research Protocol**: Focus on established data, proven methodologies, and foundational knowledge"}
+## Required markdown sections
+### 1. Executive summary
+- 5-8 key takeaways
 
-${body.contentFreshness === "Last week" ? "**Ultra-Fresh Content Priority**: Prioritize developments from the last 7 days. Source breaking news, recent studies, latest domain announcements, and immediate reactions" :
-body.contentFreshness === "Last month" ? "**Recent Development Focus**: Emphasize content and insights from the past 30 days, including monthly reports, recent case studies, and evolving domain trends" :
-body.contentFreshness === "Last quarter" ? "**Quarterly Focus**: Emphasize developments from the past 90 days with quarterly reports and seasonal trends" :
-body.contentFreshness === "Evergreen" ? "**Evergreen Content Priority**: Focus on timeless, enduring information that remains relevant regardless of recency" :
-"**Current Relevance Standard**: Balance recent developments with established authority, ensuring information accuracy and contemporary applicability"}
+### 2. Topic fundamentals
+- Definition or framing
+- Why it matters now
+- Important terms, entities, or concepts
 
-## Specialized Research Directives
-${body.customInstructions ? `**Mission-Critical Requirements**: ${body.customInstructions}\n\nThese requirements are non-negotiable and must be integrated throughout every aspect of the research output.` : "**Standard Operating Procedure**: Follow established research protocols without additional constraints"}
+### 3. Audience intelligence
+- Main pain points
+- Main questions
+- Search intents
+- Decision factors
 
-## Comprehensive Deliverable Structure
-Your research output must be delivered in professional markdown format with the following exhaustive sections:
+### 4. Competitive and content gap insights
+- What existing content usually covers
+- What is under-covered or missing
+- Angles worth owning
 
-### Strategic Topic Intelligence
-**Objective**: Establish authoritative foundation and market positioning
-- **Definitional Framework**: Provide comprehensive definitions, terminology clarification, and conceptual boundaries
-- **Market Significance Analysis**: Quantify the topic's current market impact, economic implications, and strategic importance
-- **Statistical Intelligence**: Present verified data points, market sizing, growth metrics, and comparative benchmarks
-- **Relevance Scoring**: Assess current relevance against domain priorities and audience needs
+### 5. Evidence and source guidance
+- Useful statistics, claims, or proof points to validate
+- Recommended source types to cite
+- Any freshness or compliance cautions
 
-### Competitive Landscape & Market Intelligence
-**Objective**: Identify market gaps and strategic positioning opportunities
-- **Content Competitor Analysis**: Audit top-performing content from domain leaders, analyzing messaging strategies, content gaps, and positioning approaches
-- **Market Whitespace Identification**: Pinpoint underserved content areas, unexplored angles, and audience needs not adequately addressed by existing content
-- **Competitive Advantage Mapping**: Identify unique value propositions and differentiation opportunities
-- **Content Performance Benchmarking**: Analyze engagement metrics, sharing patterns, and audience response to similar content
+### 6. Article strategy recommendations
+- Best angle for this audience
+- Suggested structure direction
+- Recommended supporting examples
+- Internal/external evidence ideas
+- FAQ ideas, list ideas, and infographic opportunities tied to the topic
 
-### Real-Time Market Dynamics & Trending Intelligence
-${body.includeTrendingTopics ? `
-**Objective**: Capture market momentum and capitalize on trending opportunities
-- **Trending Topic Analysis**: Identify and analyze current trending subtopics, hashtag performance, and viral content patterns
-- **Social Media Intelligence**: Comprehensive analysis of discussions across platforms (LinkedIn, Twitter, Reddit, etc.)
-- **News Cycle Integration**: Latest domain news, press releases, regulatory changes, and significant announcements
-- **Influencer Sentiment Analysis**: Key opinion leader perspectives, domain expert commentary, and thought leader positioning
-- **Search Trend Analysis**: Rising search queries, seasonal patterns, and emerging search intent
-` : "**Established Market Analysis**: Focus on proven trends, historical patterns, and validated market dynamics"}
+### 7. Risks and watchouts
+- Sensitive claims
+- Overused framing to avoid
+- Accuracy or compliance concerns
 
-### Advanced Audience Psychology & Behavioral Insights
-**Objective**: Develop deep audience understanding for precision content targeting
-- **Pain Point Analysis**: Comprehensive mapping of audience challenges, frustrations, and unmet needs
-- **Content Consumption Preferences**: Preferred formats, optimal length, engagement patterns, and platform preferences
-- **Question Intelligence**: Most frequently asked questions, knowledge gaps, and information-seeking behaviors
-- **Decision-Making Factors**: Key considerations that influence audience choices and behaviors
-- **Engagement Triggers**: Psychological and emotional drivers that prompt sharing, commenting, and conversion
-
-### Strategic Content Opportunity Matrix
-**Objective**: Identify high-impact content development opportunities
-- **Unique Angle Development**: Proprietary perspectives, contrarian viewpoints, and fresh approaches to established topics
-- **Controversy & Debate Mapping**: Identify productive controversies, domain debates, and discussion-worthy perspectives
-- **Expert Authority Opportunities**: Potential for expert interviews, thought leader quotes, and authoritative sourcing
-- **Content Series Potential**: Opportunities for multi-part content, pillar page development, and topic clustering
-- **Multimedia Integration Points**: Visual content opportunities, infographic potential, and interactive element suggestions
-
-### Research Methodology & Source Validation
-**Objective**: Ensure research integrity and credibility
-- **Primary Source Documentation**: List of authoritative sources, domain reports, and verified data providers
-- **Fact-Checking Protocol**: Verification methods used and cross-reference sources
-- **Recency Validation**: Publication dates, data freshness, and information currency assessment
-- **Bias Assessment**: Potential source bias identification and mitigation strategies
-
-### Executive Summary & Strategic Recommendations
-**Objective**: Provide actionable intelligence for content strategy
-- **Key Research Findings**: Top 5-7 most significant insights discovered
-- **Strategic Recommendations**: Specific guidance for content development approach
-- **Risk Assessment**: Potential challenges, sensitive topics, or areas requiring careful handling
-- **Success Metrics Suggestion**: Proposed KPIs and measurement frameworks for content performance
-
-**Data Integration Protocol**: All research inputs will be processed through advanced analytical frameworks to ensure comprehensive coverage and strategic alignment with content goals across any domain.`;
+Keep the response concise but substantive.`;
 }

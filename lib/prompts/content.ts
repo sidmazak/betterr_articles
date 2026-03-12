@@ -1,6 +1,26 @@
 import type { ContentPromptParams } from "./types";
+import {
+  getStructuredPromptInstruction,
+  serializeStructuredPromptBlock,
+} from "./toon";
+import { SEO_RULES_PROMPT_BLOCK, SEO_TARGETS } from "@/lib/seo-rules";
+
+const ARTICLE_TYPES_WITHOUT_LEAD_BOXES = new Set([
+  "news",
+  "opinion",
+  "editorial",
+  "story",
+  "profile",
+  "interview",
+]);
+
+function normalizeArticleType(articleType: string | undefined) {
+  return articleType?.trim().toLowerCase() ?? "";
+}
 
 export function buildContentPrompt(body: ContentPromptParams): string {
+  const currentDate = new Date().toISOString().slice(0, 10);
+  const currentYear = new Date().getUTCFullYear();
   const linkingStrategy: string[] = [];
   if (body.externalLinking) {
     linkingStrategy.push("Strategic external link integration for authority building and user value");
@@ -12,168 +32,173 @@ export function buildContentPrompt(body: ContentPromptParams): string {
   const articleTypeNote = body.articleType
     ? `\n- **Article Type**: ${body.articleType} (structure and conventions must match this format)`
     : "";
+  const titleNote = body.title ? `\n- **Required Title / H1**: ${body.title}` : "";
   const formatNote = body.articleFormat ? `\n- **Publication Format**: ${body.articleFormat}` : "";
   const povNote = body.pointOfView ? `\n- **Point of View**: ${body.pointOfView}` : "";
   const intentNote = body.contentIntent ? `\n- **Content Intent**: ${body.contentIntent}` : "";
   const citationNote = body.citationStyle ? `\n- **Citation Style**: ${body.citationStyle}` : "";
+  const infographicCount =
+    body.length === "Ultra-long" ? "2–3" : body.length === "Long" ? "2" : "1";
   const infographicsNote = body.requireInfographics
-    ? `\n- **Infographics**: MANDATORY - Every article MUST include infographics. Specify placement and concept for each major section.`
+    ? `\n- **Infographics**: CRITICAL – You MUST include ${infographicCount} infographic placeholder(s). Use ONLY this format: [Infographic: Clear infographic title]. Place each at the most relevant point (e.g. after a comparison, step-by-step guide, timeline, or key stats). Prefer editorial-style titles: "Breakdown", "Comparison", "Guide", "Timeline", "Checklist". Do NOT output \`\`\`html blocks. Infographics will be auto-generated. Never skip this.`
     : "";
+  const crawledInternal =
+    body.internalLinking && (body.useCrawledUrlsAsInternalLinks ?? true)
+      ? (body.existingPages ?? [])
+      : [];
+  const configuredInternal = body.internalLinking ? (body.internalLinks ?? []) : [];
+  const allInternal = [...crawledInternal, ...configuredInternal];
   const existingPagesNote =
-    body.existingPages && body.existingPages.length > 0
-      ? `\n\n### Internal Linking - Existing Pages (crawled)\n**You MUST include internal links to these existing pages where contextually relevant:**\n${body.existingPages.map((p) => `- [${p.title}](${p.url})`).join("\n")}\n\nIntegrate 3-5 internal links naturally throughout the content.`
+    allInternal.length > 0
+      ? `\n\n${serializeStructuredPromptBlock(
+          "Internal links – you MUST use these (crawled site pages)",
+          allInternal.slice(0, 20).map((p) => ({
+            title: p.title,
+            url: p.url,
+          }))
+        )}\nMANDATORY: Include at least ${SEO_TARGETS.minimumInternalLinks} internal links from this list. Use markdown format [anchor text](url). Weave them naturally into relevant sections. Do not skip linking.`
       : "";
   const publishedNote =
     body.publishedArticles && body.publishedArticles.length > 0
-      ? `\n\n### Published Articles (live on site)\n**These articles are already published. Link to them for backlinks and internal linking:**\n${body.publishedArticles.map((p) => `- [${p.title}](${p.url})`).join("\n")}\n\nInclude links to relevant published articles where it adds value.`
+      ? `\n\n${serializeStructuredPromptBlock(
+          "Published articles – link to these when relevant",
+          body.publishedArticles.slice(0, 12).map((p) => ({
+            title: p.title,
+            url: p.url,
+          }))
+        )}\nInclude links to relevant published articles where they add value.`
       : "";
+  // External links: AI finds authoritative sources automatically when externalLinking is enabled. No user-provided list.
   const languageNote = body.language && body.language !== "en"
     ? `\n- **Output Language**: Write the ENTIRE article in ${body.language.toUpperCase()}. All content, headings, and body text must be in this language.`
     : "";
+  const normalizedArticleType = normalizeArticleType(body.articleType);
+  const shouldUseLeadBoxes = !ARTICLE_TYPES_WITHOUT_LEAD_BOXES.has(normalizedArticleType);
+  const shouldRequireKeyTakeaways =
+    shouldUseLeadBoxes &&
+    (body.length === "Long" || body.length === "Ultra-long");
+  const shouldRequireTableOfContents =
+    shouldUseLeadBoxes &&
+    (body.length === "Long" ||
+      body.length === "Ultra-long" ||
+      ["guide", "how-to", "tutorial", "comparison", "explainer", "report", "research", "analysis", "case-study"].includes(normalizedArticleType));
+  const leadSectionRules = [
+    shouldRequireKeyTakeaways
+      ? "MANDATORY: Include a `## Key Takeaways` section near the top, immediately after the introduction and before the main body. Use 3-5 crisp bullets that summarize the article's value. Do not skip this."
+      : "Skip a `## Key Takeaways` box when the article format would feel templated or overly rigid.",
+    shouldRequireTableOfContents
+      ? "MANDATORY: Include a `## Table of Contents` section near the top, right after Key Takeaways (or after the intro if no Key Takeaways). List the actual H2 section headings as clickable anchors. Mirror the real structure of the article."
+      : "Do not force a `## Table of Contents` section for short, newsy, opinion-led, interview, profile, or story-style formats.",
+    "When both are used, place `## Key Takeaways` first and `## Table of Contents` immediately after it.",
+  ]
+    .map((rule) => `- ${rule}`)
+    .join("\n");
+  const contextBlock = serializeStructuredPromptBlock("Article context", {
+    primaryKeyword: body.keyword,
+    contextDate: currentDate,
+    contextYear: currentYear,
+    category: body.category,
+    domainKnowledge: body.domainKnowledge?.trim() || null,
+    audience: body.targetAudience,
+    tone: body.tone,
+    style: body.style,
+    readingLevel: body.readingLevel,
+    length: body.length,
+    authorVoice: body.authorName ?? "Brand-aligned editorial voice",
+    articleType: body.articleType ?? null,
+    articleFormat: body.articleFormat ?? null,
+    pointOfView: body.pointOfView ?? null,
+    contentIntent: body.contentIntent ?? null,
+    citationStyle: body.citationStyle ?? null,
+    outputLanguage: body.language ?? "en",
+    requireInfographics: body.requireInfographics ?? false,
+  });
+  const targetWordCount = body.length === "Short"
+    ? 1000
+    : body.length === "Medium"
+      ? 1500
+      : body.length === "Ultra-long"
+        ? 2500
+        : 1800;
 
-  return `# Industry-Leading Content Creation & Editorial Excellence
+  return `# Article Writing Brief
 
-## Content Development Mission
-You are creating premium, authoritative content that will serve as a definitive resource for its domain.
+Write a high-quality article in markdown.
 
-**Domain-Agnostic Scope**: This content applies to ANY domain or industry—entertainment, technology, finance, healthcare, lifestyle, news, B2B, B2C, or any other vertical. Adapt your tone, examples, conventions, and value proposition to match the specific domain and audience. Do not assume a particular industry; let the category and keyword guide your approach.
+## Context
+${getStructuredPromptInstruction()}
+${contextBlock}${titleNote}${articleTypeNote}${formatNote}${povNote}${intentNote}${citationNote}${infographicsNote}${languageNote}
 
-## Content Strategy Specifications
-- **Tonal Architecture**: ${body.tone} (with strategic variation for optimal engagement)
-- **Editorial Style Framework**: ${body.style}
-- **Content Scope**: ${body.length}
-- **Primary Audience Profile**: ${body.targetAudience}
-- **Accessibility Standard**: ${body.readingLevel}
-- **Authorial Voice**: ${body.authorName ?? "Brand-aligned thought leadership voice"}${articleTypeNote}${formatNote}${povNote}${intentNote}${citationNote}${infographicsNote}${languageNote}
+## Core requirements
+${body.customInstructions ? `- ${body.customInstructions}` : "- Follow strong editorial best practices"}
+- Make the article specific, useful, and publication-ready
+- Match search intent and fully answer the core topic
+- Use a clear H1/H2/H3 hierarchy: one \`# H1\` at the top, then \`## H2\` for each major section, and \`### H3\` for subsections. Never repeat the full title as plain text in the intro or body—the H1 is the only place for it. Start the introduction with the hook, not the title again.
+- ${body.title
+    ? `Use the exact H1 title \`${body.title}\` at the top of the article as \`# ${body.title}\`. Do not change the year, date, or wording. Do NOT repeat this full title in the first paragraph or elsewhere.`
+    : "Write a strong H1 title that matches the topic and search intent."}
+- Treat years, dates, ages, fees, timelines, holding periods, and compliance details as factual claims, not decoration.
+- If the title, research brief, or provided context contains a specific year or date, keep those references consistent across the full article.
+- Use contextDate/contextYear from the context block for year consistency. Do not introduce a different current year, deadline, or timeline unless clearly labeled as historical or explicitly supported by research.
+- Keep the writing concrete, accurate, and non-generic
+- Prefer active voice and crisp paragraphs
+- Do not include process commentary or mention the prompt
+- Aim for approximately ${targetWordCount}+ words unless the topic genuinely calls for less
 
-## Strategic Content Requirements
+## Linking and authority
 ${existingPagesNote}${publishedNote}
+${linkingStrategy.length > 0 ? linkingStrategy.map((strategy) => `- ${strategy}`).join("\n") : ""}
+- MANDATORY: Include at least ${SEO_TARGETS.minimumInternalLinks} internal links when a list is provided above. Use the exact URLs from the list.
+- MANDATORY: Add at least ${SEO_TARGETS.minimumAuthorityLinks} high-authority external link. Use domains like .gov, .edu, wikipedia.org, nih.gov, cdc.gov, or reputable news (reuters.com, nytimes.com). Format as [anchor text](https://...). Required for every article.
+- Use descriptive anchor text: minimum 4 characters, never "click here", "learn more", "read more", or bare URLs
+- Favor credible, recent, authoritative external sources
 
-${linkingStrategy.length > 0 ? `
-### Linking & Authority Strategy
-${linkingStrategy.map((strategy) => `- ${strategy}`).join("\n")}
+## Article structure
+- H1 at the top only. Introduction must start with the hook, not a repeat of the title. Weave the primary keyword naturally into the first paragraph without restating the full title.
+- Clear introduction that frames the reader problem and value
+- Body organized into distinct \`## H2\` sections (e.g. \`## Key Concepts\`, \`## Step-by-Step Guide\`, \`## Common Mistakes\`). Use \`### H3\` for subsections within each H2. Avoid long unbroken paragraphs without subheadings.
+- Practical examples, evidence, or comparisons where useful
+- Structure the article in a way that matches the article type instead of forcing one generic template
+- MANDATORY: Include at least one markdown bullet list (using \`-\` or \`*\`) or numbered list (using \`1. 2. 3.\`) in the article body. Place it in a relevant section.
+- Include one FAQ section with question-style subheadings whenever the topic supports it
+- When you include FAQs, format them as real markdown headings, not plain text
+- Use either \`## FAQ\` or \`## Frequently Asked Questions\` for the section heading
+- Put each FAQ item under that section as its own markdown subheading such as \`### What documents are required?\`
+- Do not write FAQ questions as plain paragraphs or standalone lines without heading markers
+- Add a conclusion or closing summary only when it suits the article format and improves the reading experience
+- Do not force a \`## Conclusion\` section for formats where a strong final section, checklist, FAQ ending, or direct close works better
+${leadSectionRules}
 
-**Link Integration Protocols**:
-- External links must enhance reader value and establish topical authority
-- Link placement should feel natural and contextually relevant
-- All external sources must be credible, recent, and authoritative
-- Internal links should create logical content pathways and improve site engagement
-- Link anchor text must be descriptive and SEO-optimized
-` : ""}
+## SEO and editorial standards
+- ${SEO_RULES_PROMPT_BLOCK}
+- Cover meaningful semantic variations where relevant
+- Use scannable formatting: lists, short paragraphs, and clear subheads
+- Anticipate and answer reader objections or common questions
+- Avoid repetition and filler
+- Keep the exact primary keyword density natural and within roughly ${SEO_TARGETS.keywordDensity.min}% to ${SEO_TARGETS.keywordDensity.max}%
+- Aim for a reliable target band around 0.7% to 1.2% so the finished article passes SEO validation cleanly
+- Use unique H2/H3 headings only
+- Include descriptive internal links where relevant and at least ${SEO_TARGETS.minimumInternalLinks} internal links when quality allows
+- Add at least one high-authority external reference when factual claims, compliance, or statistics are involved
 
-### Editorial Excellence Framework
-**Tonal Consistency**: Maintain **${body.tone.toLowerCase()}** tone while adapting for section-specific requirements
-- Introduction: Engaging and authoritative
-- Body content: Informative yet accessible
-- Conclusion: Inspiring and action-oriented
+${body.requireInfographics ? `## Infographic requirement (CRITICAL – do not skip)
+- You MUST include ${infographicCount} infographic placeholder(s). This is mandatory.
+- Use ONLY this format: [Infographic: Clear infographic title]
+- Place each at the most relevant points (e.g. after a comparison, step-by-step guide, timeline, or key stats). Each should summarize a different section—comparison, timeline, checklist, or breakdown.
+- Infographics will be auto-generated as modular editorial visuals (cards, flows, comparisons)—do NOT output \`\`\`html blocks
+- The title should describe what the infographic will show (e.g. "DMV Practice Test Breakdown—Question Distribution & Pass Rates", "Trailer Parts Comparison—Axles vs Brakes vs Couplers")
+- Prefer editorial terms: "Breakdown", "Comparison", "Guide", "Timeline", "Checklist", "Summary". Do not use "heatmap" unless it will be an actual heatmap.
+- Include the exact primary keyword phrase in at least one placeholder title for SEO` : ""}
 
-**Readability Optimization**: Target **${body.readingLevel.toLowerCase()}** reading level through:
-- Strategic sentence length variation
-- Active voice preference (80%+ of sentences)
-- Concrete language over abstract concepts
-- Logical information hierarchy
-- Smooth transitional elements
+## Final output rules
+- Output clean markdown only. No code fences around the full article.
+- Do not include notes like "here is the article" or any meta-commentary.
+- Deliver a finished draft, not an outline. Never stop mid-section, mid-list, or with a dangling number or fragment.
+- Do not include an explicit outline section or planning notes.
 
-**Audience Alignment**: Optimize for **${body.targetAudience.toLowerCase()}** through:
-- Domain-appropriate terminology (with clear explanations when needed)
-- Relevant examples and case studies from the article's vertical
-- Appropriate depth of technical detail for the domain
-- Value-focused content organization
-
-## Mission-Critical Content Directives
-${body.customInstructions ? `**Non-Negotiable Requirements**: ${body.customInstructions}\n\nThese specifications must be woven throughout the entire content piece and are essential for meeting strategic objectives.` : "**Standard Editorial Protocol**: Apply domain-appropriate best practices for content excellence"}
-
-## Comprehensive Content Deliverable Structure
-
-### Strategic Content Header
-**Objective**: Immediate impact and professional presentation
-
-#### Headline Architecture
-- **Primary Headline**: Compelling, benefit-focused, and optimized for both SEO and social sharing
-- **Subheadline/Deck**: Supporting detail that expands on the primary promise (if strategically beneficial)
-- **Editorial Metadata**: Professional byline with author credentials and publication timestamp
-- **Content Classification**: Article category and estimated reading time
-
-### Premium Content Body Development
-
-#### Introduction Excellence (Hook + Context + Preview)
-**Strategic Requirements**:
-- **Attention-Grabbing Hook**: Open with compelling statistic, surprising insight, relevant anecdote, or thought-provoking question
-- **Contextual Positioning**: Establish the topic's relevance within broader domain/vertical context
-- **Value Proposition Declaration**: Clear statement of what readers will gain from investing their time
-- **Content Roadmap**: Brief preview of key sections and primary takeaways
-- **Credibility Establishment**: Subtle indicators of expertise and authoritative sourcing
-
-#### Main Content Architecture (Research-Driven + Strategically Structured)
-**Content Development Principles**:
-- **Logical Flow Progression**: Each section builds upon previous content while standing alone as valuable
-- **Evidence-Based Arguments**: Every major claim supported by credible data, research, or expert testimony
-- **Practical Application Focus**: Theoretical concepts translated into actionable insights
-- **Engagement Maintenance**: Strategic use of questions, examples, and interactive elements
-- **Authority Building**: Consistent demonstration of deep subject matter expertise
-
-**Section Enhancement Requirements**:
-- **Smooth Transitions**: Every section connection must feel natural and purposeful
-- **Supporting Evidence Integration**: Statistics, case studies, expert quotes, and real-world examples
-- **Reader Engagement Elements**: Rhetorical questions, self-assessment opportunities, practical exercises
-- **Visual Content Integration**: Clear indicators for chart placement, infographic opportunities, and image insertion points
-
-#### Strategic Conclusion Framework (Synthesis + Action + Future)
-**Conclusion Architecture**:
-- **Key Insight Synthesis**: Comprehensive yet concise summary of primary takeaways
-- **Actionable Recommendations**: Specific, implementable next steps for readers
-- **Strategic Call-to-Action**: Engagement prompt aligned with content goals that provides additional value
-- **Future Consideration**: Domain evolution predictions or emerging trends to monitor
-- **Relationship Building**: Invitation for continued engagement or feedback
-
-### Professional Content Formatting & Enhancement
-
-#### Typography & Structure Optimization
-- **Header Hierarchy Strategy**: Strategic use of H2, H3, H4 for both readability and SEO optimization
-- **List Integration**: Bullet points and numbered lists where they enhance comprehension and scannability
-- **Emphasis Techniques**: Strategic use of **bold** and *italic* text for key concepts and important information
-- **Quote Integration**: Block quotes for significant insights, expert opinions, or important statistics
-- **White Space Management**: Optimal paragraph length and section spacing for digital readability
-
-#### Link Integration Excellence
-${body.externalLinking ? `
-**External Linking Protocol**:
-- Format: [Descriptive anchor text](URL) with strategic placement
-- Authority sources only (domain-appropriate publications, research institutions, recognized experts)
-- Contextual relevance required for every link
-- Link diversity across different authoritative domains
-- Strategic placement to enhance rather than interrupt content flow
-` : ""}
-
-${body.internalLinking ? `
-**Internal Linking Strategy**:
-- Format: [Internal: descriptive anchor text] with clear relevance indicators
-- Strategic placement for user journey optimization
-- Topic clustering and content pillar reinforcement
-- Natural integration within content context
-- SEO benefit maximization through relevant anchor text
-` : ""}
-
-#### Content Enhancement Elements
-- **Scannable Content Design**: Subheadings, bullet points, and short paragraphs for easy consumption
-- **Key Takeaway Highlighting**: Important concepts emphasized through formatting and placement
-- **Action Item Integration**: Clear next steps and practical applications throughout content
-- **Expert Voice Integration**: Authoritative quotes and insights from domain leaders and recognized voices
-- **Data Visualization Suggestions**: Clear indicators where charts, graphs, or infographics would enhance understanding
-
-### Content Performance Optimization
-
-#### SEO Excellence Integration
-- **Keyword Optimization**: Natural integration of target keywords and semantic variations
-- **Meta Content Strategy**: Title tags, meta descriptions, and header optimization
-- **Featured Snippet Optimization**: Content structured to capture voice search and featured snippets
-- **Schema Markup Opportunities**: Structured data implementation suggestions
-
-#### Engagement & Conversion Optimization
-- **Social Sharing Optimization**: Compelling quotes and insights formatted for social media sharing
-- **Email Marketing Integration**: Content segments suitable for newsletter repurposing
-- **Lead Generation Opportunities**: Natural points for content upgrades, downloads, or opt-in offers (when applicable to the domain)
-- **Community Building Elements**: Discussion starters and comment-encouraging questions
-
-**Quality Assurance Protocol**: Every content element must meet professional editorial standards, provide genuine reader value, and align with content goals while maintaining an authentic, domain-appropriate voice.`;
+## CRITICAL – NEVER include these in your output
+- Do NOT append a Meta Data, Metadata, Research brief, or SEO section at the end.
+- Do NOT output SEO Title, Meta Description, Canonical URL, Tags, Social Hashtags, Featured Image Concept, or Alt Text in the article body.
+- Metadata is generated separately and shown in the SEO tab. Your output must be the article content ONLY.
+- The finished draft should be able to score 100/100 against the provided SEO rules when it truly satisfies them.`;
 }

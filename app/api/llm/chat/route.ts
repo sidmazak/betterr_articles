@@ -4,7 +4,7 @@ import { chat } from "@/lib/llm";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { messages, model } = body;
+    const { messages, model, options } = body;
 
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json(
@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await chat(messages, model);
+    const result = await chat(messages, model, options);
     return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "LLM request failed";

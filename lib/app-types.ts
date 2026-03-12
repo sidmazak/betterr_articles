@@ -6,7 +6,7 @@ export interface CalendarItem {
   primaryKeyword: string;
   secondaryKeywords: string[];
   suggestedDate: string;
-  targetUrl: string;
+  targetUrl?: string;
   contentGapRationale: string;
   internalLinkTargets: {
     url: string;

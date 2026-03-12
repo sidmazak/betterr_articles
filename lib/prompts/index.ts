@@ -3,7 +3,7 @@
  * Supports any industry, format, style, and article type.
  *
  * Usage:
- *   import { buildResearchPrompt, buildOutlinePrompt } from "@/lib/prompts";
+ *   import { buildResearchPrompt, buildContentPrompt } from "@/lib/prompts";
  *   import type { ResearchPromptParams, ArticlePipelineInput } from "@/lib/prompts";
  */
 
@@ -28,7 +28,6 @@ export type {
   GeoParams,
   CustomInstructionsParams,
   ResearchPromptParams,
-  OutlinePromptParams,
   ContentPromptParams,
   FactCheckPromptParams,
   HumanizePromptParams,
@@ -52,7 +51,6 @@ export type {
 
 // Prompt builders
 export { buildResearchPrompt } from "./research";
-export { buildOutlinePrompt } from "./outline";
 export { buildContentPrompt } from "./content";
 export { buildFactCheckPrompt } from "./fact-check";
 export { buildHumanizePrompt } from "./humanize";
@@ -63,7 +61,6 @@ export { buildContentCalendarPrompt } from "./content-calendar";
 // Pipeline helpers (unified input -> individual prompts)
 export {
   toResearchParams,
-  toOutlineParams,
   toContentParams,
   toFactCheckParams,
   toHumanizeParams,

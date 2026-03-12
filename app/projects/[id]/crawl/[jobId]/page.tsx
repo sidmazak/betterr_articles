@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,9 +34,118 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { ChevronDown, ChevronRight, Pencil, Plus, Trash2, RotateCw, Map, Clock, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Plus, Trash2, RotateCw, Map, Clock, Search, Pause, Play, CircleSlash } from "lucide-react";
 import type { Project } from "@/lib/db";
 import type { CrawlJob, CrawlResultPageRow, CrawlJobLogRow } from "@/lib/db";
+
+type PageSEOReference = {
+  processed: boolean;
+  topics: string[];
+  keywords: string[];
+  summary: string;
+  entities: string[];
+  questions: string[];
+  painPoints: string[];
+  contentAngles: string[];
+  searchIntents: string[];
+  productsServices: string[];
+};
+
+const EMPTY_PAGE_SEO_REFERENCE: PageSEOReference = {
+  processed: false,
+  topics: [],
+  keywords: [],
+  summary: "",
+  entities: [],
+  questions: [],
+  painPoints: [],
+  contentAngles: [],
+  searchIntents: [],
+  productsServices: [],
+};
+
+function parsePageSEOReference(value: string | null): PageSEOReference {
+  if (!value) return EMPTY_PAGE_SEO_REFERENCE;
+
+  try {
+    const parsed = JSON.parse(value) as Partial<PageSEOReference> & {
+      reference?: Partial<PageSEOReference>;
+    };
+    const nestedReference =
+      parsed.reference && typeof parsed.reference === "object"
+        ? (parsed.reference as Partial<PageSEOReference>)
+        : null;
+    return {
+      processed: true,
+      topics: normalizeSeoArray(parsed.topics),
+      keywords: normalizeSeoArray(parsed.keywords),
+      summary: typeof parsed.summary === "string" ? parsed.summary.trim() : "",
+      entities: normalizeSeoArray(parsed.entities ?? nestedReference?.entities),
+      questions: normalizeSeoArray(parsed.questions ?? nestedReference?.questions),
+      painPoints: normalizeSeoArray(parsed.painPoints ?? nestedReference?.painPoints),
+      contentAngles: normalizeSeoArray(parsed.contentAngles ?? nestedReference?.contentAngles),
+      searchIntents: normalizeSeoArray(parsed.searchIntents ?? nestedReference?.searchIntents),
+      productsServices: normalizeSeoArray(parsed.productsServices ?? nestedReference?.productsServices),
+    };
+  } catch {
+    return EMPTY_PAGE_SEO_REFERENCE;
+  }
+}
+
+function normalizeSeoArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function mergeCrawlPage(
+  existing: CrawlResultPageRow | undefined,
+  incoming: CrawlResultPageRow
+): CrawlResultPageRow {
+  if (!existing) return incoming;
+
+  return {
+    ...existing,
+    ...incoming,
+    title: incoming.title ?? existing.title,
+    meta_description: incoming.meta_description ?? existing.meta_description,
+    content_preview: incoming.content_preview ?? existing.content_preview,
+    status_code: incoming.status_code ?? existing.status_code,
+    seo_reference_json: incoming.seo_reference_json ?? existing.seo_reference_json,
+    created_at: incoming.created_at ?? existing.created_at,
+  };
+}
+
+function mergeCrawlPages(
+  currentPages: CrawlResultPageRow[],
+  incomingPages: CrawlResultPageRow[]
+): CrawlResultPageRow[] {
+  if (incomingPages.length === 0) return currentPages;
+
+  const currentByKey = new globalThis.Map<string, CrawlResultPageRow>();
+  for (const page of currentPages) {
+    currentByKey.set(page.id ?? page.url, page);
+    currentByKey.set(page.url, page);
+  }
+
+  const merged = incomingPages.map((incomingPage) =>
+    mergeCrawlPage(
+      currentByKey.get(incomingPage.id ?? incomingPage.url) ?? currentByKey.get(incomingPage.url),
+      incomingPage
+    )
+  );
+
+  const incomingKeys = new Set(
+    incomingPages.flatMap((page) => [page.id ?? page.url, page.url])
+  );
+
+  for (const page of currentPages) {
+    const pageKeys = [page.id ?? page.url, page.url];
+    if (pageKeys.some((key) => incomingKeys.has(key))) continue;
+    merged.push(page);
+  }
+
+  return merged;
+}
 
 export default function CrawlJobStreamPage() {
   const params = useParams();
@@ -46,10 +155,10 @@ export default function CrawlJobStreamPage() {
   const [job, setJob] = useState<CrawlJob | null>(null);
   const [logs, setLogs] = useState<CrawlJobLogRow[]>([]);
   const [pages, setPages] = useState<CrawlResultPageRow[]>([]);
+  const [insight, setInsight] = useState<{ topics?: string[]; keywords?: string[]; summary?: string | null } | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [pageSearch, setPageSearch] = useState("");
   const eventSourceRef = useRef<EventSource | null>(null);
-  const logsEndRef = useRef<HTMLDivElement | null>(null);
 
   const filteredPages = pageSearch.trim()
     ? pages.filter(
@@ -70,10 +179,6 @@ export default function CrawlJobStreamPage() {
   }
 
   useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
-
-  useEffect(() => {
     fetch(`/api/projects/${id}`)
       .then((r) => (r.ok ? r.json() : null))
       .then(setProject)
@@ -88,7 +193,8 @@ export default function CrawlJobStreamPage() {
         if (data) {
           setJob(data);
           setLogs(data.logs ?? []);
-          setPages(data.pages ?? []);
+          setPages((prev) => mergeCrawlPages(prev, data.pages ?? []));
+          setInsight(data.insight ?? null);
         }
       })
       .catch(() => setJob(null));
@@ -97,14 +203,17 @@ export default function CrawlJobStreamPage() {
   // Poll for logs while crawl is in progress (fallback + when cron runs the job)
   useEffect(() => {
     if (!id || !jobId || !job) return;
-    if (job.status === "completed" || job.status === "failed") return;
+    if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") return;
 
     const poll = () => {
       fetch(`/api/projects/${id}/crawl/${jobId}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
           if (d?.logs?.length) setLogs(d.logs);
-          if (d?.pages?.length) setPages(d.pages);
+          if (d?.pages?.length) {
+            setPages((prev) => mergeCrawlPages(prev, d.pages));
+          }
+          setInsight(d?.insight ?? null);
           if (d) setJob(d);
         })
         .catch(() => {});
@@ -116,17 +225,45 @@ export default function CrawlJobStreamPage() {
 
   useEffect(() => {
     if (!id || !jobId || !job) return;
-    if (job.status === "completed" || job.status === "failed") return;
+    if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") return;
 
-    setStreaming(true);
     const es = new EventSource(`/api/projects/${id}/crawl/${jobId}/stream`);
     eventSourceRef.current = es;
 
+    es.addEventListener("open", () => setStreaming(true));
     es.addEventListener("progress", (e) => {
       const data = JSON.parse((e as MessageEvent).data);
       setJob((prev) =>
-        prev ? { ...prev, progress: data.progress, total_pages: data.total } : prev
+        prev
+          ? {
+              ...prev,
+              progress: data.progress ?? prev.progress,
+              total_pages: data.total ?? prev.total_pages,
+              current_stage: data.stage ?? prev.current_stage,
+              current_url: data.url ?? prev.current_url,
+              eta_seconds: data.etaSeconds ?? prev.eta_seconds,
+              completed_batches: data.completedBatches ?? prev.completed_batches,
+              total_batches: data.totalBatches ?? prev.total_batches,
+            }
+          : prev
       );
+    });
+
+    es.addEventListener("page", (e) => {
+      const data = JSON.parse((e as MessageEvent).data) as { page?: CrawlResultPageRow };
+      const updatedPage = data.page;
+      if (!updatedPage) return;
+      setPages((prev) => {
+        const index = prev.findIndex(
+          (p) => p.id === updatedPage.id || p.url === updatedPage.url
+        );
+        if (index === -1) {
+          return [...prev, updatedPage];
+        }
+        const next = [...prev];
+        next[index] = mergeCrawlPage(next[index], updatedPage);
+        return next;
+      });
     });
 
     es.addEventListener("log", (e) => {
@@ -137,6 +274,8 @@ export default function CrawlJobStreamPage() {
           id: `log-${Date.now()}-${prev.length}`,
           level: data.level ?? "info",
           message: data.message ?? "",
+          stage: data.stage ?? null,
+          details: data.details ? JSON.stringify(data.details) : null,
           created_at: new Date().toISOString(),
         } as CrawlJobLogRow,
       ]);
@@ -145,7 +284,6 @@ export default function CrawlJobStreamPage() {
     es.addEventListener("done", (e) => {
       const data = JSON.parse((e as MessageEvent).data);
       setJob(data.job);
-      setPages(data.pages ?? []);
       setStreaming(false);
       es.close();
       eventSourceRef.current = null;
@@ -155,7 +293,10 @@ export default function CrawlJobStreamPage() {
           .then((d) => {
             if (d) {
               setLogs(d.logs ?? []);
-              if (d.pages?.length) setPages(d.pages);
+              if (d.pages?.length) {
+                setPages((prev) => mergeCrawlPages(prev, d.pages));
+              }
+              setInsight(d.insight ?? null);
             }
           });
       }
@@ -163,8 +304,7 @@ export default function CrawlJobStreamPage() {
 
     es.onerror = () => {
       setStreaming(false);
-      es.close();
-      eventSourceRef.current = null;
+      // Don't close - EventSource auto-reconnects. Only close on "done".
     };
 
     return () => {
@@ -180,6 +320,25 @@ export default function CrawlJobStreamPage() {
       </div>
     );
   }
+
+  async function updateJob(action: "pause" | "resume" | "cancel") {
+    const res = await fetch(`/api/projects/${id}/crawl/${jobId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setJob(data);
+    }
+  }
+
+  const etaLabel =
+    job?.eta_seconds && job.eta_seconds > 0
+      ? job.eta_seconds >= 60
+        ? `Estimated time: ~${Math.ceil(job.eta_seconds / 60)} min remaining`
+        : `Estimated time: ~${job.eta_seconds}s remaining`
+      : "Estimated time: calculating...";
 
   return (
     <div className="w-full">
@@ -202,6 +361,9 @@ export default function CrawlJobStreamPage() {
           )}
         </div>
         <p className="text-muted-foreground">{project.name}</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Review the full crawl timeline here: page discovery, crawl progress, extracted SEO insights, and any retries, pauses, or cancellations.
+        </p>
       </div>
 
       {job?.error_message && (
@@ -217,16 +379,56 @@ export default function CrawlJobStreamPage() {
               ? `Crawling... ${job.progress}${job.total_pages ? ` / ${job.total_pages}` : ""} pages`
               : "Starting crawl..."}
           </p>
+          <p className="text-xs text-muted-foreground">
+            Stage: {job.current_stage ?? job.status}
+            {job.current_url ? ` • ${job.current_url}` : ""}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {etaLabel}
+            {!!job.total_batches && ` • AI batches ${job.completed_batches ?? 0}/${job.total_batches}`}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            This job preserves partial progress, so you can pause, resume, or cancel without losing the pages and logs collected so far.
+          </p>
           {job.total_pages && job.total_pages > 0 && (
             <Progress
               value={Math.round((job.progress / job.total_pages) * 100)}
               className="h-2"
             />
           )}
+          <div className="flex gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => updateJob("pause")}>
+              <Pause className="mr-2 h-4 w-4" />
+              Pause
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => updateJob("cancel")}>
+              <CircleSlash className="mr-2 h-4 w-4" />
+              Cancel
+            </Button>
+          </div>
         </div>
       )}
 
-      {job && (job.status === "completed" || job.status === "failed") && (
+      {job?.status === "paused" && (
+        <div className="mb-6 space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+          <p className="text-sm font-medium text-amber-700 dark:text-amber-400">Crawl paused</p>
+          <p className="text-xs text-muted-foreground">
+            Resume when ready. Progress, collected pages, extracted data, and logs all stay attached to this crawl job.
+          </p>
+          <div className="flex gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => updateJob("resume")}>
+              <Play className="mr-2 h-4 w-4" />
+              Resume
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => updateJob("cancel")}>
+              <CircleSlash className="mr-2 h-4 w-4" />
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {job && (job.status === "completed" || job.status === "failed" || job.status === "cancelled") && (
         <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-lg border bg-muted/30 px-4 py-3">
             <p className="text-xs font-medium text-muted-foreground">Source</p>
@@ -258,6 +460,46 @@ export default function CrawlJobStreamPage() {
           </div>
         </div>
       )}
+
+      {insight && (insight.topics?.length || insight.keywords?.length) ? (
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Extracted SEO insights</CardTitle>
+            <CardDescription>
+              Topics, keyword phrases, and summary signals pulled from the pages collected in this crawl job.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {insight.summary && (
+              <p className="text-sm text-muted-foreground">{insight.summary}</p>
+            )}
+            {!!insight.topics?.length && (
+              <div>
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Topics</p>
+                <div className="flex flex-wrap gap-2">
+                  {insight.topics.slice(0, 12).map((topic) => (
+                    <Badge key={topic} variant="outline" className="font-normal">
+                      {topic}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!!insight.keywords?.length && (
+              <div>
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Keywords</p>
+                <div className="flex flex-wrap gap-2">
+                  {insight.keywords.slice(0, 20).map((keyword) => (
+                    <Badge key={keyword} variant="secondary" className="font-normal">
+                      {keyword}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="space-y-6">
         <Card>
@@ -303,6 +545,12 @@ export default function CrawlJobStreamPage() {
                     page={p}
                     projectId={id}
                     jobId={jobId}
+                    isExtracting={
+                      !!job &&
+                      (job.status === "running" || job.status === "pending") &&
+                      job.current_stage === "extracting" &&
+                      job.current_url === p.url
+                    }
                     onUpdate={(updated) =>
                       setPages((prev) =>
                         prev.map((x) => (x.url === p.url ? { ...x, ...updated } : x))
@@ -321,7 +569,9 @@ export default function CrawlJobStreamPage() {
         <Card>
           <CardHeader>
             <CardTitle>Logs</CardTitle>
-            <CardDescription>Crawl process logs</CardDescription>
+            <CardDescription>
+              Detailed crawl and AI-processing events, including stages, retries, extraction progress, and completion details.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {logs.length === 0 ? (
@@ -343,11 +593,12 @@ export default function CrawlJobStreamPage() {
                       {log.created_at ? new Date(log.created_at).toLocaleTimeString() : ""}
                     </span>
                     <span>
-                      [{log.level}] {log.message}
+                      [{log.level}]
+                      {log.stage ? ` [${log.stage}]` : ""} {log.message}
+                      {log.details ? ` ${log.details}` : ""}
                     </span>
                   </li>
                 ))}
-                <div ref={logsEndRef} />
               </ul>
             )}
           </CardContent>
@@ -361,12 +612,14 @@ function PageCard({
   page,
   projectId,
   jobId,
+  isExtracting,
   onUpdate,
   onDelete,
 }: {
   page: CrawlResultPageRow;
   projectId: string;
   jobId: string;
+  isExtracting: boolean;
   onUpdate: (updates: Partial<CrawlResultPageRow>) => void;
   onDelete: () => void;
 }) {
@@ -378,6 +631,18 @@ function PageCard({
   const [saving, setSaving] = useState(false);
   const [recrawling, setRecrawling] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const seoReference = parsePageSEOReference(page.seo_reference_json);
+  const extractionCompleted = seoReference.processed || page.seo_reference_json !== null;
+  const hasSeoReference =
+    seoReference.topics.length > 0 ||
+    seoReference.keywords.length > 0 ||
+    seoReference.summary.length > 0 ||
+    seoReference.entities.length > 0 ||
+    seoReference.questions.length > 0 ||
+    seoReference.painPoints.length > 0 ||
+    seoReference.contentAngles.length > 0 ||
+    seoReference.searchIntents.length > 0 ||
+    seoReference.productsServices.length > 0;
 
   useEffect(() => {
     if (editOpen) {
@@ -485,9 +750,60 @@ function PageCard({
                 </p>
               )}
               {page.status_code != null && (
-                <Badge variant="outline" className="mt-2 text-xs">
-                  {page.status_code}
-                </Badge>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Badge variant="outline" className="text-xs">
+                    {page.status_code}
+                  </Badge>
+                  <Badge
+                    variant="outline"
+                    className={
+                      hasSeoReference
+                        ? "border-green-500/30 bg-green-500/10 text-green-700 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-400"
+                        : extractionCompleted
+                          ? "border-slate-500/30 bg-slate-500/10 text-slate-700 dark:border-slate-500/30 dark:bg-slate-500/10 dark:text-slate-300"
+                        : isExtracting
+                          ? "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-400"
+                        : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400"
+                    }
+                  >
+                    {hasSeoReference
+                      ? "Data extracted"
+                      : extractionCompleted
+                        ? "Extraction complete"
+                      : isExtracting
+                        ? "Extracting now..."
+                        : "Extraction pending"}
+                  </Badge>
+                </div>
+              )}
+              {hasSeoReference && !open && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {seoReference.topics.slice(0, 2).map((topic) => (
+                    <Badge key={topic} variant="secondary" className="font-normal">
+                      {topic}
+                    </Badge>
+                  ))}
+                  {seoReference.keywords.slice(0, 3).map((keyword) => (
+                    <Badge key={keyword} variant="outline" className="font-normal">
+                      {keyword}
+                    </Badge>
+                  ))}
+                  {seoReference.entities.slice(0, 3).map((entity) => (
+                    <Badge key={entity} variant="secondary" className="font-normal">
+                      {entity}
+                    </Badge>
+                  ))}
+                  {seoReference.searchIntents.slice(0, 2).map((intent) => (
+                    <Badge key={intent} variant="outline" className="font-normal">
+                      {intent}
+                    </Badge>
+                  ))}
+                  {seoReference.questions.length > 0 && (
+                    <Badge variant="outline" className="font-normal">
+                      {seoReference.questions.length} questions
+                    </Badge>
+                  )}
+                </div>
               )}
             </div>
             {canEdit && (
@@ -597,18 +913,84 @@ function PageCard({
           </div>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="border-t px-4 py-3 pl-12">
-            {page.content_preview ? (
-              <pre className="whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
-                {page.content_preview}
-              </pre>
-            ) : (
-              <p className="text-xs text-muted-foreground">No content preview.</p>
-            )}
+          <div className="space-y-4 border-t px-4 py-3 pl-12">
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Content preview
+              </p>
+              {page.content_preview ? (
+                <pre className="whitespace-pre-wrap wrap-break-word font-mono text-xs text-muted-foreground">
+                  {page.content_preview}
+                </pre>
+              ) : (
+                <p className="text-xs text-muted-foreground">No content preview.</p>
+              )}
+            </div>
+
+            <div className="rounded-lg border bg-muted/30 p-3">
+              <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Extracted data
+              </p>
+              {hasSeoReference ? (
+                <div className="space-y-3">
+                  {seoReference.summary && (
+                    <div>
+                      <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Summary
+                      </p>
+                      <p className="text-xs text-muted-foreground">{seoReference.summary}</p>
+                    </div>
+                  )}
+                  <SeoReferenceGroup label="Topics" items={seoReference.topics} variant="secondary" />
+                  <SeoReferenceGroup label="Keywords" items={seoReference.keywords} variant="outline" />
+                  <SeoReferenceGroup label="Entities" items={seoReference.entities} variant="secondary" />
+                  <SeoReferenceGroup label="Products & services" items={seoReference.productsServices} variant="secondary" />
+                  <SeoReferenceGroup label="Search intents" items={seoReference.searchIntents} variant="outline" />
+                  <SeoReferenceGroup label="Pain points" items={seoReference.painPoints} variant="outline" />
+                  <SeoReferenceGroup label="Content angles" items={seoReference.contentAngles} variant="outline" />
+                  <SeoReferenceGroup label="Questions" items={seoReference.questions} variant="outline" />
+                </div>
+              ) : extractionCompleted ? (
+                <p className="text-xs text-muted-foreground">
+                  Extraction completed for this URL, but the AI did not return any structured topics, keywords, or entities for this page. Check the terminal logs for the raw extraction response and parsing details.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Extraction data is not available for this URL yet. It will appear here after the page is processed by the extraction step. You can also use the recrawl button on this card to refresh it.
+                </p>
+              )}
+            </div>
           </div>
         </CollapsibleContent>
       </li>
     </Collapsible>
+  );
+}
+
+function SeoReferenceGroup({
+  label,
+  items,
+  variant,
+}: {
+  label: string;
+  items: string[];
+  variant: "outline" | "secondary";
+}) {
+  if (items.length === 0) return null;
+
+  return (
+    <div>
+      <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {items.map((item) => (
+          <Badge key={item} variant={variant} className="font-normal">
+            {item}
+          </Badge>
+        ))}
+      </div>
+    </div>
   );
 }
 

@@ -55,7 +55,7 @@ export async function sendNotification(
     await transport.sendMail({
       from: settings.smtp_user || settings.email,
       to: settings.email,
-      subject: `[Better Articles] ${subject}`,
+      subject: `[${process.env.NEXT_PUBLIC_SITE_NAME}] ${subject}`,
       text: body,
       html: `<div style="font-family: sans-serif;"><h2>${subject}</h2>${projectName ? `<p><strong>Project:</strong> ${projectName}</p>` : ""}<pre style="white-space: pre-wrap;">${body}</pre></div>`,
     });

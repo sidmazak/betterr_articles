@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -32,12 +33,14 @@ interface ArticleDefaultsFormProps {
   values: ArticleDefaultsFormValues;
   onChange: (values: ArticleDefaultsFormValues) => void;
   showProjectContext?: boolean;
+  crawledLinksContent?: ReactNode;
 }
 
 export function ArticleDefaultsForm({
   values,
   onChange,
   showProjectContext = false,
+  crawledLinksContent,
 }: ArticleDefaultsFormProps) {
   const update = (key: keyof ArticlePipelineInput, value: unknown) => {
     onChange({ ...values, [key]: value === "" || value === undefined ? undefined : value });
@@ -314,7 +317,7 @@ export function ArticleDefaultsForm({
           <div className="flex items-center justify-between">
             <div>
               <Label htmlFor="internal">Internal linking</Label>
-              <p className="text-sm text-muted-foreground">Link to crawled pages</p>
+              <p className="text-sm text-muted-foreground">Allow internal links in generated articles</p>
             </div>
             <Switch
               id="internal"
@@ -322,6 +325,21 @@ export function ArticleDefaultsForm({
               onCheckedChange={(v) => update("internalLinking", v)}
             />
           </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <Label htmlFor="use-crawled-internal">Use crawled URLs as internal links</Label>
+              <p className="text-sm text-muted-foreground">
+                Let AI link to URLs discovered during crawl in addition to saved internal links
+              </p>
+            </div>
+            <Switch
+              id="use-crawled-internal"
+              checked={values.useCrawledUrlsAsInternalLinks ?? true}
+              onCheckedChange={(v) => update("useCrawledUrlsAsInternalLinks", v)}
+              disabled={values.internalLinking === false}
+            />
+          </div>
+          {(values.useCrawledUrlsAsInternalLinks ?? true) && crawledLinksContent}
           <div className="flex items-center justify-between">
             <div>
               <Label htmlFor="external">External linking</Label>
@@ -369,13 +387,44 @@ export function ArticleDefaultsForm({
             </Select>
           </div>
           <div className="space-y-2 sm:col-span-2">
-            <Label>Custom instructions</Label>
+            <Label>Custom instructions (article writing)</Label>
             <Textarea
               value={values.customInstructions ?? ""}
               onChange={(e) => update("customInstructions", e.target.value)}
               placeholder="Additional instructions for the AI (e.g. brand voice, specific style rules)"
               rows={4}
             />
+          </div>
+        </div>
+      </div>
+
+      {/* Content idea & domain */}
+      <div className="space-y-4">
+        <h3 className="text-sm font-semibold">Content idea generation & domain knowledge</h3>
+        <div className="grid gap-4 sm:grid-cols-1">
+          <div className="space-y-2">
+            <Label>Content idea custom instructions</Label>
+            <Textarea
+              value={values.contentIdeaCustomInstructions ?? ""}
+              onChange={(e) => update("contentIdeaCustomInstructions", e.target.value)}
+              placeholder="Instructions for content calendar / idea generation (e.g. prefer how-to topics, avoid product comparisons)"
+              rows={3}
+            />
+            <p className="text-xs text-muted-foreground">
+              Applied when generating content ideas in the calendar. Auto-filled from crawl when you click Load optimal settings.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label>Domain knowledge</Label>
+            <Textarea
+              value={values.domainKnowledge ?? ""}
+              onChange={(e) => update("domainKnowledge", e.target.value)}
+              placeholder="What this site does, its niche, audience, products/services. Auto-filled from crawl when you click Load optimal settings."
+              rows={4}
+            />
+            <p className="text-xs text-muted-foreground">
+              Used throughout article and idea generation. Auto-filled from crawl data when you run Load optimal settings.
+            </p>
           </div>
         </div>
       </div>

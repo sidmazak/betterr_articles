@@ -1,212 +1,156 @@
-import { getProjectPublishing } from "@/lib/db/settings";
-import type { PublishingPlatform } from "@/lib/db/settings";
+import {
+  getProjectPublishingConfig,
+  listAutoPublishProjectPublishingConfigs,
+  listEnabledProjectPublishingConfigs,
+  listProjectPublishingConfigs,
+  recordPublishingAttempt,
+  updateProjectPublishingConfig,
+  type PublishingPlatform,
+} from "@/lib/db/settings";
+import { wordPressAdapter } from "./adapters/wordpress";
+import { ghostAdapter } from "./adapters/ghost";
+import { mediumAdapter } from "./adapters/medium";
+import { webhookAdapter } from "./adapters/webhook";
+import { wixAdapter } from "./adapters/wix";
+import { odooAdapter } from "./adapters/odoo";
+import type {
+  PublishMetadata,
+  PublishPayload,
+  PublishResult,
+  PublisherAdapter,
+  PublisherConnectionResult,
+  PublishTargetResult,
+} from "./types";
 
-export interface PublishResult {
-  success: boolean;
-  url?: string;
-  error?: string;
-}
+const PUBLISHER_REGISTRY: Record<PublishingPlatform, PublisherAdapter> = {
+  wordpress: wordPressAdapter,
+  ghost: ghostAdapter,
+  medium: mediumAdapter,
+  webhook: webhookAdapter,
+  wix: wixAdapter,
+  odoo: odooAdapter,
+};
 
 export async function publishArticle(
   projectId: string,
   title: string,
   content: string,
-  metadata?: { excerpt?: string; tags?: string[] }
+  metadata?: PublishMetadata
 ): Promise<PublishResult> {
-  const config = getProjectPublishing(projectId);
-  if (!config) {
-    return { success: false, error: "No publishing platform configured for this project" };
-  }
-
-  const parsed = JSON.parse(config.config) as Record<string, unknown>;
-
-  switch (config.platform as PublishingPlatform) {
-    case "wordpress":
-      return publishToWordPress(parsed, title, content, metadata);
-    case "webhook":
-      return publishToWebhook(parsed, title, content, metadata);
-    case "ghost":
-      return publishToGhost(parsed, title, content, metadata);
-    case "medium":
-      return publishToMedium(parsed, title, content, metadata);
-    default:
-      return { success: false, error: `Platform ${config.platform} not yet supported` };
-  }
+  const result = await publishArticleToPlatforms(projectId, { title, content, metadata });
+  const firstSuccess = result.results.find((item) => item.success);
+  return firstSuccess
+    ? { success: true, url: firstSuccess.url, details: { results: result.results } }
+    : {
+        success: false,
+        error: result.results.map((item) => `${item.label}: ${item.error ?? "Unknown error"}`).join(" | "),
+        details: { results: result.results },
+      };
 }
 
-async function publishToWordPress(
-  config: Record<string, unknown>,
-  title: string,
-  content: string,
-  metadata?: { excerpt?: string; tags?: string[] }
-): Promise<PublishResult> {
-  const siteUrl = config.siteUrl as string;
-  const username = config.username as string;
-  const appPassword = config.appPassword as string;
-
-  if (!siteUrl || !username || !appPassword) {
-    return { success: false, error: "WordPress: siteUrl, username, appPassword required" };
+export async function publishArticleToPlatforms(
+  projectId: string,
+  payload: PublishPayload,
+  options?: {
+    articleId?: string | null;
+    calendarItemId?: string | null;
+    publishingConfigIds?: string[];
+    autoPublishOnly?: boolean;
   }
+) {
+  const configs = options?.publishingConfigIds?.length
+    ? options.publishingConfigIds
+        .map((id) => getProjectPublishingConfig(id))
+        .filter((config): config is NonNullable<typeof config> => !!config && config.project_id === projectId && config.enabled === 1)
+    : options?.autoPublishOnly
+      ? listAutoPublishProjectPublishingConfigs(projectId)
+      : listEnabledProjectPublishingConfigs(projectId);
 
-  const auth = Buffer.from(`${username}:${appPassword}`).toString("base64");
-
-  try {
-    const res = await fetch(`${siteUrl.replace(/\/$/, "")}/wp-json/wp/v2/posts`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Basic ${auth}`,
-      },
-      body: JSON.stringify({
-        title,
-        content,
-        status: "draft",
-        excerpt: metadata?.excerpt ?? "",
-        tags: metadata?.tags ?? [],
-      }),
-    });
-
-    if (!res.ok) {
-      const err = await res.text();
-      return { success: false, error: `WordPress API: ${err}` };
-    }
-
-    const data = await res.json();
-    return { success: true, url: data.link };
-  } catch (err) {
+  if (configs.length === 0) {
     return {
-      success: false,
-      error: err instanceof Error ? err.message : "WordPress publish failed",
-    };
-  }
-}
-
-async function publishToWebhook(
-  config: Record<string, unknown>,
-  title: string,
-  content: string,
-  metadata?: { excerpt?: string; tags?: string[] }
-): Promise<PublishResult> {
-  const url = config.webhookUrl as string;
-  if (!url) {
-    return { success: false, error: "Webhook: webhookUrl required" };
-  }
-
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, content, ...metadata }),
-    });
-
-    if (!res.ok) {
-      return { success: false, error: `Webhook returned ${res.status}` };
-    }
-    return { success: true };
-  } catch (err) {
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : "Webhook failed",
-    };
-  }
-}
-
-async function publishToGhost(
-  config: Record<string, unknown>,
-  title: string,
-  content: string,
-  metadata?: { excerpt?: string; tags?: string[] }
-): Promise<PublishResult> {
-  const adminUrl = config.adminUrl as string;
-  const apiKey = config.apiKey as string;
-
-  if (!adminUrl || !apiKey) {
-    return { success: false, error: "Ghost: adminUrl, apiKey required" };
-  }
-
-  try {
-    const res = await fetch(
-      `${adminUrl.replace(/\/$/, "")}/ghost/api/admin/posts/?source=html`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Ghost ${apiKey}`,
+      results: [
+        {
+          configId: "none",
+          platform: "none",
+          label: "No configured publisher",
+          success: false,
+          error: options?.autoPublishOnly
+            ? "No enabled auto-publish destinations are configured for this project."
+            : "No enabled publishing destinations are configured for this project.",
         },
-        body: JSON.stringify({
-          posts: [
-            {
-              title,
-              html: content,
-              status: "draft",
-              custom_excerpt: metadata?.excerpt,
-              tags: (metadata?.tags ?? []).map((name) => ({ name })),
-            },
-          ],
-        }),
-      }
-    );
-
-    if (!res.ok) {
-      const err = await res.text();
-      return { success: false, error: `Ghost API: ${err}` };
-    }
-
-    const data = await res.json();
-    const post = data.posts?.[0];
-    return { success: true, url: post?.url };
-  } catch (err) {
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : "Ghost publish failed",
+      ] satisfies PublishTargetResult[],
     };
   }
-}
 
-async function publishToMedium(
-  config: Record<string, unknown>,
-  title: string,
-  content: string,
-  metadata?: { excerpt?: string; tags?: string[] }
-): Promise<PublishResult> {
-  const token = config.integrationToken as string;
-  const userId = config.userId as string;
+  const results: PublishTargetResult[] = [];
+  for (const config of configs) {
+    const adapter = PUBLISHER_REGISTRY[config.platform as PublishingPlatform];
+    if (!adapter) {
+      results.push({
+        configId: config.id,
+        platform: config.platform,
+        label: config.label,
+        success: false,
+        error: `Platform ${config.platform} is not supported.`,
+      });
+      continue;
+    }
 
-  if (!token || !userId) {
-    return { success: false, error: "Medium: integrationToken, userId required" };
-  }
-
-  try {
-    const res = await fetch(`https://api.medium.com/v1/users/${userId}/posts`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        title,
-        contentFormat: "markdown",
-        content,
-        license: "all-rights-reserved",
-        publishStatus: "draft",
-        notifyFollowers: false,
-        tags: metadata?.tags ?? [],
-      }),
+    const parsedConfig = JSON.parse(config.config) as Record<string, unknown>;
+    const publishResult = await adapter.publish(parsedConfig, payload);
+    updateProjectPublishingConfig(config.id, {
+      last_error: publishResult.success ? null : publishResult.error ?? "Publish failed",
+    });
+    results.push({
+      configId: config.id,
+      platform: config.platform,
+      label: config.label,
+      ...publishResult,
     });
 
-    if (!res.ok) {
-      const err = await res.text();
-      return { success: false, error: `Medium API: ${err}` };
-    }
-
-    const data = await res.json();
-    return { success: true, url: data.data?.url };
-  } catch (err) {
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : "Medium publish failed",
-    };
+    recordPublishingAttempt({
+      projectId,
+      articleId: options?.articleId ?? null,
+      calendarItemId: options?.calendarItemId ?? null,
+      publishingConfigId: config.id,
+      platform: config.platform,
+      label: config.label,
+      status: publishResult.success ? "success" : "failed",
+      title: payload.title,
+      publishedUrl: publishResult.url ?? null,
+      errorMessage: publishResult.error ?? null,
+      response: publishResult.details ?? null,
+    });
   }
+
+  return { results };
+}
+
+export async function testPublishingConfigConnection(configId: string): Promise<PublisherConnectionResult> {
+  const config = getProjectPublishingConfig(configId);
+  if (!config) {
+    return { success: false, message: "Publishing config not found." };
+  }
+
+  const adapter = PUBLISHER_REGISTRY[config.platform as PublishingPlatform];
+  if (!adapter) {
+    return { success: false, message: `Platform ${config.platform} is not supported.` };
+  }
+
+  const parsedConfig = JSON.parse(config.config) as Record<string, unknown>;
+  return adapter.testConnection(parsedConfig);
+}
+
+export function listConfiguredPublishingPlatforms(projectId: string) {
+  return listProjectPublishingConfigs(projectId).map((config) => ({
+    id: config.id,
+    platform: config.platform,
+    label: config.label,
+    enabled: config.enabled === 1,
+    auto_publish: config.auto_publish === 1,
+    last_error: config.last_error,
+    last_tested_at: config.last_tested_at,
+  }));
 }
 
 export { PUBLISHING_PLATFORMS } from "@/lib/publishing-constants";

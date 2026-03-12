@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProject } from "@/lib/db/projects";
-import { getCrawlJob, getCrawlResultPages, updateCrawlResultPage } from "@/lib/db/crawl-jobs";
+import {
+  getCrawlJob,
+  getCrawlResultPages,
+  updateCrawlResultPage,
+  updateCrawlResultPageSEOReference,
+} from "@/lib/db/crawl-jobs";
 import { crawlSingleUrl } from "@/lib/crawler";
+import { extractSEOInsights } from "@/lib/seo-extraction";
 
 export async function POST(
   _request: NextRequest,
@@ -36,7 +42,25 @@ export async function POST(
       return NextResponse.json({ error: "Page not editable" }, { status: 404 });
     }
 
-    return NextResponse.json(updated);
+    const pageInsight = await extractSEOInsights(
+      projectId,
+      project.homepage_url ?? page.url,
+      [fresh],
+      {
+        crawlJobId: jobId,
+        maxKeywords: 20,
+        save: false,
+      }
+    );
+
+    const withSeoData = updateCrawlResultPageSEOReference(jobId, page.url, {
+      topics: pageInsight.topics,
+      keywords: pageInsight.keywords,
+      summary: pageInsight.summary,
+      reference: pageInsight.reference,
+    });
+
+    return NextResponse.json(withSeoData ?? updated);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Recrawl failed";
     return NextResponse.json({ error: message }, { status: 500 });

@@ -36,6 +36,22 @@ async function fetchModelsForProvider(
   baseUrl: string
 ): Promise<string[]> {
   switch (provider) {
+    case "nvidia": {
+      if (!apiKey) return [];
+      const res = await fetch("https://integrate.api.nvidia.com/v1/models", {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+      });
+      if (!res.ok) throw new Error("NVIDIA API error");
+      const data = await res.json();
+      const models: string[] = (data.data ?? [])
+        .filter((m: { id?: string }) => m.id)
+        .map((m: { id: string }) => m.id)
+        .sort();
+      return [...new Set(models)].slice(0, 80);
+    }
     case "openai": {
       if (!apiKey) return [];
       const res = await fetch("https://api.openai.com/v1/models", {

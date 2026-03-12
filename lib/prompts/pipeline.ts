@@ -1,7 +1,6 @@
 import type {
   ArticlePipelineInput,
   ResearchPromptParams,
-  OutlinePromptParams,
   ContentPromptParams,
   FactCheckPromptParams,
   HumanizePromptParams,
@@ -9,7 +8,6 @@ import type {
   MetadataPromptParams,
 } from "./types";
 import { buildResearchPrompt } from "./research";
-import { buildOutlinePrompt } from "./outline";
 import { buildContentPrompt } from "./content";
 import { buildFactCheckPrompt } from "./fact-check";
 import { buildHumanizePrompt } from "./humanize";
@@ -31,29 +29,7 @@ export function toResearchParams(input: ArticlePipelineInput): ResearchPromptPar
     articleType: input.articleType,
     contentIntent: input.contentIntent,
     customInstructions: input.customInstructions,
-  };
-}
-
-/**
- * Converts unified pipeline input to OutlinePromptParams.
- */
-export function toOutlineParams(input: ArticlePipelineInput): OutlinePromptParams {
-  return {
-    keyword: input.keyword,
-    category: input.category,
-    targetAudience: input.targetAudience,
-    style: input.style ?? "Informative",
-    readingLevel: input.readingLevel ?? "Intermediate",
-    targetWordCount: input.targetWordCount,
-    length: input.length ?? "Medium",
-  includeSubtopics: input.includeSubtopics,
-  title: input.title,
-  requireInfographics: input.requireInfographics ?? true,
-    articleType: input.articleType,
-    articleFormat: input.articleFormat,
-    pointOfView: input.pointOfView,
-    contentIntent: input.contentIntent,
-    customInstructions: input.customInstructions,
+    domainKnowledge: input.domainKnowledge,
   };
 }
 
@@ -65,22 +41,26 @@ export function toContentParams(input: ArticlePipelineInput): ContentPromptParam
     keyword: input.keyword,
     category: input.category,
     targetAudience: input.targetAudience,
+    title: input.title,
     tone: input.tone ?? "Professional",
     style: input.style ?? "Informative",
     readingLevel: input.readingLevel ?? "Intermediate",
     length: input.length ?? "Medium",
     authorName: input.authorName,
     externalLinking: input.externalLinking,
-  internalLinking: input.internalLinking ?? true,
-  articleType: input.articleType,
-  existingPages: input.existingPages,
-  publishedArticles: input.publishedArticles,
-  requireInfographics: input.requireInfographics ?? true,
+    internalLinking: input.internalLinking ?? true,
+    useCrawledUrlsAsInternalLinks: input.useCrawledUrlsAsInternalLinks ?? true,
+    articleType: input.articleType,
+    existingPages: input.existingPages,
+    publishedArticles: input.publishedArticles,
+    internalLinks: input.internalLinks,
+    requireInfographics: input.requireInfographics ?? true,
     articleFormat: input.articleFormat,
     pointOfView: input.pointOfView,
     contentIntent: input.contentIntent,
     citationStyle: input.citationStyle,
     customInstructions: input.customInstructions,
+    domainKnowledge: input.domainKnowledge,
     language: input.language,
   };
 }
@@ -139,6 +119,10 @@ export function toMetadataParams(input: ArticlePipelineInput): MetadataPromptPar
     authorName: input.authorName,
     articleType: input.articleType,
     articleFormat: input.articleFormat,
+    content: input.content,
+    researchContent: input.researchContent,
+    secondaryKeywords: input.secondaryKeywords,
+    language: input.language,
   };
 }
 
@@ -148,7 +132,6 @@ export function toMetadataParams(input: ArticlePipelineInput): MetadataPromptPar
 export function buildAllPrompts(input: ArticlePipelineInput) {
   return {
     research: buildResearchPrompt(toResearchParams(input)),
-    outline: buildOutlinePrompt(toOutlineParams(input)),
     content: buildContentPrompt(toContentParams(input)),
     factCheck: buildFactCheckPrompt(toFactCheckParams(input)),
     humanize: buildHumanizePrompt(toHumanizeParams(input)),

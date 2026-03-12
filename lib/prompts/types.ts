@@ -130,6 +130,11 @@ export interface CustomInstructionsParams {
   customInstructions?: string;
 }
 
+/** Domain knowledge about the site (from crawl or manual). Used in article/idea generation. */
+export interface DomainKnowledgeParams {
+  domainKnowledge?: string;
+}
+
 /** Article output language (ISO 639-1 code) */
 export type ArticleLanguage = "en" | "es" | "fr" | "de" | "it" | "pt" | "nl" | "pl" | "ru" | "ja" | "zh" | "ko" | "ar" | "hi" | string;
 
@@ -137,7 +142,7 @@ export type ArticleLanguage = "en" | "es" | "fr" | "de" | "it" | "pt" | "nl" | "
 // Research Prompt
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface ResearchPromptParams extends BasePromptParams, GeoParams, CustomInstructionsParams {
+export interface ResearchPromptParams extends BasePromptParams, GeoParams, CustomInstructionsParams, DomainKnowledgeParams {
   /** Source URL to reference (optional - triggers independent research if absent) */
   url?: string;
   /** Include trending topics and real-time social sentiment analysis */
@@ -151,38 +156,6 @@ export interface ResearchPromptParams extends BasePromptParams, GeoParams, Custo
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Outline Prompt
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface OutlinePromptParams
-  extends BasePromptParams,
-    StyleParams,
-    ReadingLevelParams,
-    CustomInstructionsParams {
-  /** Precise word count target (overrides length if set) */
-  targetWordCount?: number;
-  /** Content length classification */
-  length: ContentLength;
-  /** Include multi-layered subtopic development */
-  includeSubtopics?: boolean;
-  /** Pre-defined title (if absent, generate 5-7 variations) */
-  title?: string;
-  /** Article type - determines structure (listicle, how-to, guide, etc.) */
-  articleType?: ArticleType;
-  /** Publication format */
-  articleFormat?: ArticleFormat;
-  /** Narrative point of view */
-  pointOfView?: PointOfView;
-  /** Content intent */
-  contentIntent?: ContentIntent;
-  /** Require infographics in every section (mandatory) */
-  requireInfographics?: boolean;
-  /** Output language (ISO 639-1 code) */
-  language?: ArticleLanguage;
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Content Prompt
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -191,7 +164,10 @@ export interface ContentPromptParams
     ToneParams,
     StyleParams,
     ReadingLevelParams,
-    CustomInstructionsParams {
+    CustomInstructionsParams,
+    DomainKnowledgeParams {
+  /** Suggested article title or required H1 */
+  title?: string;
   /** Content length/scope */
   length: ContentLength;
   /** Author name for byline */
@@ -200,6 +176,8 @@ export interface ContentPromptParams
   externalLinking?: boolean;
   /** Enable internal linking architecture */
   internalLinking?: boolean;
+  /** Allow crawled site URLs to be used as internal link targets */
+  useCrawledUrlsAsInternalLinks?: boolean;
   /** Article type - determines structure and conventions */
   articleType?: ArticleType;
   /** Publication format */
@@ -210,10 +188,14 @@ export interface ContentPromptParams
   contentIntent?: ContentIntent;
   /** Citation style for references */
   citationStyle?: CitationStyle;
-  /** Existing pages for internal linking (url, title) - crawled URLs */
+  /** Existing pages discovered from crawl/manual URLs */
   existingPages?: ExistingPage[];
   /** Published articles (url, title) - live blog URLs for backlinks/internal linking */
   publishedArticles?: ExistingPage[];
+  /** User-added internal links for this site only */
+  internalLinks?: ExistingPage[];
+  /** User-added external links for referencing */
+  externalLinks?: ExistingPage[];
   /** Require infographics in every article (mandatory) */
   requireInfographics?: boolean;
   /** Output language (ISO 639-1 code, e.g. en, es, fr) */
@@ -266,6 +248,14 @@ export interface MetadataPromptParams extends BasePromptParams {
   articleType?: ArticleType;
   /** Publication format */
   articleFormat?: ArticleFormat;
+  /** Final article markdown content */
+  content?: string;
+  /** Generated research brief */
+  researchContent?: string;
+  /** Helpful secondary keywords */
+  secondaryKeywords?: string[];
+  /** Output language */
+  language?: ArticleLanguage;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -296,12 +286,24 @@ export interface ArticlePipelineInput {
   includeSubtopics?: boolean;
   externalLinking?: boolean;
   internalLinking?: boolean;
+  useCrawledUrlsAsInternalLinks?: boolean;
   socialMediaOptimization?: boolean;
   customInstructions?: string;
+  /** Custom instructions for content idea/calendar generation (e.g. topic preferences, angles to avoid) */
+  contentIdeaCustomInstructions?: string;
+  /** Domain knowledge about the site (auto-filled from crawl or manual). Used in article/idea generation. */
+  domainKnowledge?: string;
+  researchContent?: string;
+  content?: string;
+  secondaryKeywords?: string[];
   /** Existing pages for internal linking (crawled URLs) */
   existingPages?: ExistingPage[];
   /** Published articles (live URLs) for backlinks/internal linking */
   publishedArticles?: ExistingPage[];
+  /** User-added internal links for this site only */
+  internalLinks?: ExistingPage[];
+  /** User-added external links for referencing */
+  externalLinks?: ExistingPage[];
   /** Require infographics in every article (default: true) */
   requireInfographics?: boolean;
   /** Output language (ISO 639-1 code) */
@@ -317,12 +319,41 @@ export interface ContentCalendarPromptParams {
   homepageUrl: string;
   /** List of crawled URLs with titles (existing content) */
   existingPages: ExistingPage[];
+  /** User-added internal links from project settings */
+  internalLinks?: ExistingPage[];
   /** Whether sitemap was found and used */
   usedSitemap?: boolean;
   /** Number of content suggestions to generate */
   suggestionCount?: number;
   /** Target publishing frequency (e.g., "2 per week") */
   publishingFrequency?: string;
+  /** AI-extracted keywords from crawled content (prioritize for article topics) */
+  extractedKeywords?: string[];
+  /** Rich SEO reference data collected during crawl + AI analysis */
+  seoReference?: {
+    summary?: string | null;
+    topics?: string[];
+    questions?: string[];
+    painPoints?: string[];
+    contentAngles?: string[];
+    productsServices?: string[];
+  };
+  /** Generate for whole month (suggestionCount = days in month) */
+  wholeMonth?: boolean;
+  /** Start date for calendar range (YYYY-MM-DD) */
+  startDate?: string;
+  /** End date for calendar range (YYYY-MM-DD) */
+  endDate?: string;
+  /** User feedback to incorporate when regenerating */
+  userFeedback?: string;
+  /** Existing calendar items (to avoid duplicates, incorporate feedback) */
+  existingItems?: { targetUrl?: string; primaryKeyword?: string; title?: string }[];
+  /** Published articles already live for this project (must avoid duplicating) */
+  publishedItems?: { targetUrl?: string; primaryKeyword?: string; title?: string }[];
+  /** Custom instructions for content idea generation (from project settings) */
+  contentIdeaCustomInstructions?: string;
+  /** Domain knowledge about the site (auto-filled from crawl or manual). Used in idea generation. */
+  domainKnowledge?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -430,4 +461,18 @@ export interface MetadataOutput {
   seo: MetadataSEO;
   social: MetadataSocial;
   analytics: MetadataAnalytics;
+}
+
+export interface GeneratedArticleMetadata {
+  title: string;
+  slug: string;
+  seoTitle: string;
+  metaDescription: string;
+  excerpt: string;
+  tags: string[];
+  category: string;
+  canonicalUrl?: string | null;
+  coverImageAlt: string;
+  coverImagePrompt: string;
+  socialHashtags?: string[];
 }
