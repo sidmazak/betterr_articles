@@ -147,7 +147,7 @@ flowchart TD
         S --> U[Content prompt]
         T --> U
         U --> V[Stream article markdown]
-        V --> W[Infographic placeholders<br/>[Infographic: Title]]
+        V --> W[Infographic placeholders<br/>placeholder format]
         W --> X[Metadata prompt → JSON]
         X --> Y[generateAndReplacePlaceholders<br/>→ infographic images]
         Y --> Z[SEO optimization loop<br/>until score ≥ 90]
