@@ -108,7 +108,7 @@ type ArticleResponse = {
 type ContentFormat = "markdown" | "html" | "text";
 
 const ARTICLE_BODY_PROSE_CLASSES =
-  "prose prose-neutral max-w-none text-[16px] leading-8 text-foreground dark:prose-invert lg:text-[1.05rem] lg:leading-8 lg:prose-lg prose-p:my-5 prose-p:leading-8 prose-headings:scroll-mt-24 prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-foreground prose-h1:mb-5 prose-h1:text-4xl prose-h2:mt-12 prose-h2:mb-5 prose-h2:text-3xl prose-h3:mt-10 prose-h3:mb-4 prose-h3:text-2xl prose-h4:mt-8 prose-h4:mb-3 prose-h4:text-xl prose-strong:font-semibold prose-strong:text-foreground prose-li:my-2 prose-li:leading-8 prose-blockquote:border-l-sky-300 prose-blockquote:text-foreground/80 prose-img:rounded-xl prose-img:border prose-pre:overflow-x-auto prose-table:w-full prose-table:border-collapse prose-table:overflow-x-auto prose-thead:border-b prose-th:border prose-th:border-border prose-th:bg-muted/50 prose-th:px-4 prose-th:py-3 prose-th:text-left prose-th:font-semibold prose-td:border prose-td:border-border prose-td:px-4 prose-td:py-3 prose-a:font-medium prose-a:text-blue-600 prose-a:underline prose-a:decoration-blue-500 prose-a:underline-offset-4 hover:prose-a:text-blue-800 prose-mark:rounded-sm prose-mark:bg-yellow-200 prose-mark:px-1 prose-mark:text-inherit";
+  "prose prose-neutral max-w-none wrap-break-word text-[16px] leading-8 text-foreground dark:prose-invert lg:text-[1.05rem] lg:leading-8 lg:prose-lg prose-p:my-5 prose-p:leading-8 prose-headings:scroll-mt-24 prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-foreground prose-h1:mb-5 prose-h1:text-4xl prose-h2:mt-12 prose-h2:mb-5 prose-h2:text-3xl prose-h3:mt-10 prose-h3:mb-4 prose-h3:text-2xl prose-h4:mt-8 prose-h4:mb-3 prose-h4:text-xl prose-strong:font-semibold prose-strong:text-foreground prose-li:my-2 prose-li:leading-8 prose-blockquote:border-l-sky-300 prose-blockquote:text-foreground/80 prose-img:rounded-xl prose-img:border prose-pre:overflow-x-auto prose-table:w-full prose-table:border-collapse prose-table:overflow-x-auto prose-thead:border-b prose-th:border prose-th:border-border prose-th:bg-muted/50 prose-th:px-4 prose-th:py-3 prose-th:text-left prose-th:font-semibold prose-td:border prose-td:border-border prose-td:px-4 prose-td:py-3 prose-a:font-medium prose-a:text-blue-600 prose-a:underline prose-a:decoration-blue-500 prose-a:underline-offset-4 hover:prose-a:text-blue-800 prose-mark:rounded-sm prose-mark:bg-yellow-200 prose-mark:px-1 prose-mark:text-inherit";
 
 function copyToClipboard(value: string) {
   if (!value) return Promise.resolve();
@@ -424,22 +424,24 @@ function InfographicBlock({
 
   return (
     <figure className="my-10 w-full max-w-4xl mx-auto overflow-hidden rounded-xl border border-border/80 bg-muted/10 p-4">
-      {isImageInfographic ? (
-        <div className="flex justify-center">
-          <img
-            src={`data:image/png;base64,${imageBase64}`}
-            alt={title}
-            className="w-full max-w-full h-auto object-contain rounded-lg"
+      <div className={regenerating ? "opacity-40 transition-opacity duration-200" : "transition-opacity duration-200"}>
+        {isImageInfographic ? (
+          <div className="flex justify-center">
+            <img
+              src={`data:image/png;base64,${imageBase64}`}
+              alt={title}
+              className="w-full max-w-full h-auto object-contain rounded-lg"
+            />
+          </div>
+        ) : (
+          <div
+            ref={containerRef}
+            className="overflow-x-auto rounded-lg bg-muted/20 p-4 text-foreground"
+            dangerouslySetInnerHTML={{ __html: html ?? "" }}
           />
-        </div>
-      ) : (
-        <div
-          ref={containerRef}
-          className="overflow-x-auto rounded-lg bg-muted/20 p-4 text-foreground"
-          dangerouslySetInnerHTML={{ __html: html ?? "" }}
-        />
-      )}
-      <figcaption className="px-2 pt-3 text-sm text-muted-foreground text-center">{title}</figcaption>
+        )}
+        <figcaption className="px-2 pt-3 text-sm text-muted-foreground text-center">{title}</figcaption>
+      </div>
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
         <Button variant="outline" size="sm" onClick={handleEmbed}>
           {embedCopied ? <Check className="mr-1 h-4 w-4" /> : <Code className="mr-1 h-4 w-4" />}
@@ -572,13 +574,17 @@ export default function ArticleViewPage() {
       </div>
       <header className="space-y-6 border-b pb-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0 space-y-4">
+          <div className="min-w-0 flex-1 space-y-4">
             <div className="flex flex-wrap gap-2 text-sm">
               <Badge variant={article.status === "published" ? "default" : "secondary"}>
                 {article.status}
               </Badge>
               {article.category ? <Badge variant="outline">{article.category}</Badge> : null}
-              {article.slug ? <Badge variant="outline">/{article.slug}</Badge> : null}
+              {article.slug ? (
+                <span className="inline-block max-w-full break-all rounded-md border border-border px-2 py-0.5 text-xs font-medium">
+                  /{article.slug}
+                </span>
+              ) : null}
               <Badge className={scoreToneClasses}>
                 <Trophy className="mr-1 h-3.5 w-3.5" />
                 {article.seoAudit.score}/100
@@ -590,12 +596,12 @@ export default function ArticleViewPage() {
                 </Badge>
               ) : null}
             </div>
-            <div className="space-y-3">
-              <h1 className="max-w-5xl text-balance text-4xl font-semibold tracking-tight text-foreground lg:text-5xl">
+            <div className="min-w-0 space-y-3">
+              <h1 className="max-w-5xl wrap-break-word text-balance text-4xl font-semibold tracking-tight text-foreground lg:text-5xl">
                 {article.title}
               </h1>
               {article.excerpt ? (
-                <p className="max-w-4xl text-lg leading-8 text-muted-foreground lg:text-[1.35rem]">
+                <p className="max-w-4xl wrap-break-word text-lg leading-8 text-muted-foreground lg:text-[1.35rem]">
                   {article.excerpt}
                 </p>
               ) : null}
@@ -612,9 +618,11 @@ export default function ArticleViewPage() {
         </div>
 
         {article.tags.length > 0 && (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex min-w-0 flex-wrap gap-2">
             {article.tags.map((tag) => (
-              <Badge key={tag} variant="outline">{tag}</Badge>
+              <Badge key={tag} variant="outline" className="max-w-full overflow-visible whitespace-normal wrap-break-word">
+                {tag}
+              </Badge>
             ))}
           </div>
         )}
@@ -872,36 +880,36 @@ export default function ArticleViewPage() {
           </div>
 
           <section className="grid gap-6 lg:grid-cols-2">
-            <div className="space-y-2">
+            <div className="min-w-0 space-y-2">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">SEO title</p>
-              <p className="text-base leading-7 text-foreground">
+              <p className="wrap-break-word text-base leading-7 text-foreground">
                 {article.seo_title || "Not generated yet."}
               </p>
             </div>
-            <div className="space-y-2">
+            <div className="min-w-0 space-y-2">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Meta description</p>
-              <p className="text-base leading-7 text-foreground">
+              <p className="wrap-break-word text-base leading-7 text-foreground">
                 {article.meta_description || "Not generated yet."}
               </p>
             </div>
           </section>
           <Separator />
-          <section className="space-y-2">
+          <section className="min-w-0 space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Slug</p>
-            <p className="text-base leading-7 text-foreground">{article.slug || "Not generated yet."}</p>
+            <p className="break-all text-base leading-7 text-foreground">{article.slug || "Not generated yet."}</p>
           </section>
           <Separator />
-          <section className="space-y-3">
+          <section className="min-w-0 space-y-3">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Excerpt</p>
-            <p className="text-base leading-7 text-foreground">
+            <p className="wrap-break-word text-base leading-7 text-foreground">
               {article.excerpt || "Not generated yet."}
             </p>
           </section>
           <Separator />
           <section className="grid gap-6 lg:grid-cols-2">
-            <div className="space-y-2">
+            <div className="min-w-0 space-y-2">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Cover image alt</p>
-              <p className="text-base leading-7 text-foreground">
+              <p className="wrap-break-word text-base leading-7 text-foreground">
                 {article.publishMetadata?.coverImageAlt || article.cover_image_alt || "Not generated yet."}
               </p>
             </div>

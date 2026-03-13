@@ -15,6 +15,7 @@ import { getArticle, deleteArticle, isArticleEmpty, unlinkArticleFromCalendar, u
 import { updateCalendarItemStatus } from "@/lib/db/calendar";
 import { generateArticleBody, maybeGenerateArticleResearch, optimizeArticleForSeoSignals, PATCHABLE_CONTENT_CHECK_IDS } from "@/lib/article-pipeline";
 import { bootstrapMetadataForSeo, generateArticleMetadata, syncArticleH1WithTitle } from "@/lib/article-assets";
+import { getOvershootCheckIds, patchMetadataOvershootsWithAI } from "@/lib/seo-metadata-patch";
 import { buildArticleSections, cleanArticleMarkdown, renderArticleAsText } from "@/lib/article-content";
 import { ensureHttpsUrl } from "@/lib/infographic-renderer";
 import { generateAndReplacePlaceholders } from "@/lib/infographic-placeholder";
@@ -840,13 +841,28 @@ export async function processArticleGenerationJob(
           .filter((c) => !c.passed && METADATA_CHECK_IDS.has(c.id))
           .length;
         if (metadataChecksFailing > 0) {
-          /** When stuck (15+ passes no progress), bootstrap metadata programmatically to reach 90+ */
-          if (noProgressCount >= 15) {
-            const failingIds = new Set(
-              currentAudit.checks
-                .filter((c) => !c.passed && METADATA_CHECK_IDS.has(c.id))
-                .map((c) => c.id)
-            );
+          const failingIds = new Set(
+            currentAudit.checks
+              .filter((c) => !c.passed && METADATA_CHECK_IDS.has(c.id))
+              .map((c) => c.id)
+          );
+          const overshootIds = getOvershootCheckIds(failingIds, currentMetadata);
+
+          /** SEO audit layer: use AI to patch metadata overshoots (title/meta too long) */
+          if (overshootIds.size > 0) {
+            emitLog("info", "Patching metadata overshoots with AI (SEO audit).", { count: overshootIds.size }, "article-seo-optimize");
+            try {
+              currentMetadata = await patchMetadataOvershootsWithAI(
+                currentMetadata,
+                overshootIds,
+                input.keyword ?? "",
+                streamChat
+              );
+            } catch {
+              /* keep existing metadata */
+            }
+          } else if (noProgressCount >= 15) {
+            /** When stuck (15+ passes no progress), bootstrap metadata programmatically to reach 90+ */
             emitLog("info", "Applying metadata bootstrap to fix failing checks (model stuck).", { count: failingIds.size }, "article-seo-optimize");
             currentMetadata = bootstrapMetadataForSeo(currentMetadata, failingIds, input, finalizedContent);
           } else {

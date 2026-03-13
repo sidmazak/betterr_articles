@@ -16,13 +16,19 @@ function maskApiKey(key: string | null) {
 function toSafeSettings(includeSecrets = false) {
   const settings = getImageGenerationSettings();
   if (!settings) return null;
+  const needsKey = settings.provider !== "horde";
+  const isConfigured = !!(
+    settings.enabled &&
+    settings.model?.trim() &&
+    (needsKey ? settings.api_key?.trim() : true)
+  );
 
   return {
     ...settings,
     api_key: includeSecrets ? settings.api_key : undefined,
     api_key_set: !!settings.api_key,
     api_key_masked: maskApiKey(settings.api_key),
-    is_configured: !!(settings.enabled && settings.api_key?.trim() && settings.model?.trim()),
+    is_configured: isConfigured,
   };
 }
 
@@ -43,7 +49,8 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    if (!current?.api_key && !body.api_key?.trim()) {
+    const providerNeedsKey = body.provider !== "horde";
+    if (providerNeedsKey && !current?.api_key && !body.api_key?.trim()) {
       return NextResponse.json(
         { error: "API key is required for image generation setup." },
         { status: 400 }

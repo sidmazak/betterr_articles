@@ -39,6 +39,31 @@ async function fetchImageModelsForProvider(
     case "openai": {
       return ["gpt-image-1", "dall-e-3"];
     }
+    case "horde": {
+      const res = await fetch("https://aihorde.net/api/v2/status/models?type=image");
+      if (!res.ok) throw new Error("AI Horde API error");
+      const data = await res.json();
+      const defaultModels = ["SDXL_beta::stability.ai/stable-diffusion-xl-base-1.0", "Deliberate", "DreamShaper"];
+      const fromApi = (data ?? [])
+        .filter((m: { name?: string }) => m.name)
+        .map((m: { name: string }) => m.name)
+        .sort();
+      return [...new Set([...defaultModels, ...fromApi])].slice(0, 80);
+    }
+    case "stability": {
+      if (!apiKey) return [];
+      const res = await fetch("https://api.stability.ai/v1/engines/list", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (!res.ok) throw new Error("Stability AI API error");
+      const data = await res.json();
+      const defaultModels = ["stable-diffusion-xl-1024-v1-0", "stable-diffusion-xl-1024-v0-9", "stable-diffusion-v1-6"];
+      const fromApi = (data ?? [])
+        .filter((e: { id?: string; type?: string }) => e.id && (e.type === "PICTURE" || !e.type))
+        .map((e: { id: string }) => e.id)
+        .sort();
+      return [...new Set([...defaultModels, ...fromApi])].slice(0, 30);
+    }
     case "google": {
       if (!apiKey) return [];
       const res = await fetch(

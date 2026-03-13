@@ -228,7 +228,8 @@ function SettingsPageContent() {
 
   async function saveImageSettings() {
     const hasKey = imageApiKey.trim().length > 0;
-    if (!imageApiKeySet && !hasKey) {
+    const providerNeedsKey = imageProvider !== "horde";
+    if (providerNeedsKey && !imageApiKeySet && !hasKey) {
       setMessage("Image API key is required for new setup.");
       return;
     }
@@ -686,7 +687,7 @@ function SettingsPageContent() {
               <CardHeader>
                 <CardTitle>Article image generation</CardTitle>
                 <CardDescription>
-                  Configure the global text-to-image provider for article cover images. Supports OpenAI, OpenRouter, Together AI, LiteLLM, and custom URLs. Cover images use 16:9 aspect ratio.
+                  Configure the global text-to-image provider for article cover images. Supports OpenAI, OpenRouter, Together AI, LiteLLM, Stability AI, AI Horde (free, community-powered), and custom URLs. Cover images use 16:9 aspect ratio.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -732,7 +733,9 @@ function SettingsPageContent() {
                       placeholder={
                         imageApiKeySet
                           ? "Enter new key to overwrite (leave blank to keep current)"
-                          : "Enter text-to-image API key"
+                          : imageProvider === "horde"
+                            ? "Optional for AI Horde (leave blank for anonymous)"
+                            : "Enter text-to-image API key"
                       }
                       className="flex-1"
                     />
@@ -756,7 +759,7 @@ function SettingsPageContent() {
                       onClick={fetchImageModels}
                       disabled={
                         fetchingImageModels ||
-                        ((imageProvider === "together" || imageProvider === "litellm" || imageProvider === "custom" || imageProvider === "google") &&
+                        ((imageProvider === "together" || imageProvider === "litellm" || imageProvider === "custom" || imageProvider === "google" || imageProvider === "stability") &&
                           !imageApiKey &&
                           !imageApiKeySet)
                       }

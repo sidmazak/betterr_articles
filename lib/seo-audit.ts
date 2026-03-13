@@ -455,7 +455,9 @@ export function buildSeoAudit(input: BuildSeoAuditInput): SeoAuditResult {
       "excerpt",
       "meta-and-technical",
       "Excerpt ready",
-      !!input.excerpt && input.excerpt.trim().length >= 120,
+      !!input.excerpt &&
+        input.excerpt.trim().length >= SEO_TARGETS.excerptLength.min &&
+        input.excerpt.trim().length <= SEO_TARGETS.excerptLength.max,
       input.excerpt ? `${input.excerpt.length} characters` : "Missing"
     ),
   ];

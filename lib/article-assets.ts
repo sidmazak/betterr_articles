@@ -35,7 +35,7 @@ export function bootstrapMetadataForSeo(
 
   if (failingCheckIds.has("keyword-in-title") && keyword && !includesKeyword(title, keyword) && !includesKeyword(seoTitle || "", keyword)) {
     const base = title || seoTitle || keyword;
-    seoTitle = `${keyword}: ${base}`.slice(0, SEO_TARGETS.titleLength.max);
+    seoTitle = `${keyword}: ${base}`;
     title = seoTitle;
   }
 
@@ -44,33 +44,27 @@ export function bootstrapMetadataForSeo(
     const idx = current.indexOf(keyword.toLowerCase());
     if (idx > 24 || idx < 0) {
       const rest = (seoTitle || title).replace(new RegExp(keyword, "gi"), "").replace(/\s*:\s*/, "").trim();
-      seoTitle = `${keyword}: ${rest}`.slice(0, SEO_TARGETS.titleLength.max);
+      seoTitle = `${keyword}: ${rest}`;
       title = seoTitle;
     }
   }
 
-  if (failingCheckIds.has("title-length") && seoTitle) {
-    if (seoTitle.length < SEO_TARGETS.titleLength.min) {
-      seoTitle = `${seoTitle} - ${keyword} guide`.slice(0, SEO_TARGETS.titleLength.max);
-      title = seoTitle;
-    } else if (seoTitle.length > SEO_TARGETS.titleLength.max) {
-      seoTitle = seoTitle.slice(0, SEO_TARGETS.titleLength.max);
-      title = seoTitle;
-    }
+  if (failingCheckIds.has("title-length") && seoTitle && seoTitle.length < SEO_TARGETS.titleLength.min) {
+    seoTitle = `${seoTitle} - ${keyword} guide`;
+    title = seoTitle;
   }
 
   if (failingCheckIds.has("keyword-in-meta") && keyword) {
     if (!metaDescription || !includesKeyword(metaDescription, keyword)) {
-      const seed = metaDescription?.slice(0, 80) || buildExcerpt(content, 80);
+      const seed = metaDescription || buildExcerpt(content);
       metaDescription = `${seed} ${keyword} guide for ${input.targetAudience}.`.replace(/\s+/g, " ").trim();
     }
   }
   if (failingCheckIds.has("meta-description-length") || (metaDescription && metaDescription.length < SEO_TARGETS.metaDescriptionLength.min)) {
     if (!metaDescription || metaDescription.length < SEO_TARGETS.metaDescriptionLength.min) {
-      const seed = metaDescription || buildExcerpt(content, 100) || `${keyword} guide`;
+      const seed = metaDescription || buildExcerpt(content) || `${keyword} guide`;
       metaDescription = ensureMinimumMetaDescription(seed, `${keyword} for ${input.targetAudience}`);
     }
-    metaDescription = metaDescription.slice(0, SEO_TARGETS.metaDescriptionLength.max);
   }
 
   if (failingCheckIds.has("seo-friendly-url") && keyword && slug) {
@@ -93,11 +87,11 @@ export function bootstrapMetadataForSeo(
   }
 
   if (failingCheckIds.has("excerpt")) {
-    const base = excerpt?.trim() || buildExcerpt(content, 200);
+    const base = excerpt?.trim() || buildExcerpt(content);
     if (base.length < 120) {
-      excerpt = `${base} ${keyword} guide for ${input.targetAudience}. Learn more about ${keyword} and get expert tips.`.replace(/\s+/g, " ").trim().slice(0, 220);
+      excerpt = `${base} ${keyword} guide for ${input.targetAudience}. Learn more about ${keyword} and get expert tips.`.replace(/\s+/g, " ").trim();
     } else {
-      excerpt = base.slice(0, 220);
+      excerpt = base;
     }
   }
 
@@ -118,11 +112,10 @@ export function createSlug(value: string) {
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .replace(/-{2,}/g, "-")
-    .slice(0, 96);
+    .replace(/-{2,}/g, "-");
 }
 
-export function buildExcerpt(content: string, maxLength = 220) {
+export function buildExcerpt(content: string) {
   const clean = content
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/<[^>]+>/g, " ")
@@ -130,9 +123,7 @@ export function buildExcerpt(content: string, maxLength = 220) {
     .replace(/\s+/g, " ")
     .trim();
 
-  if (!clean) return "";
-  if (clean.length <= maxLength) return clean;
-  return `${clean.slice(0, maxLength - 1).trim()}…`;
+  return clean || "";
 }
 
 export function parseStringArray(value: unknown, fallback: string[] = []) {
@@ -144,18 +135,12 @@ function dedupeStrings(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
-function clampTextLength(value: string, maxLength: number) {
-  if (value.length <= maxLength) return value;
-  return value.slice(0, maxLength).trim();
-}
-
 function ensureMinimumMetaDescription(content: string, fallback: string) {
   if (content.length >= SEO_TARGETS.metaDescriptionLength.min) {
-    return clampTextLength(content, SEO_TARGETS.metaDescriptionLength.max);
+    return content;
   }
 
-  const padded = `${content} ${fallback}`.replace(/\s+/g, " ").trim();
-  return clampTextLength(padded, SEO_TARGETS.metaDescriptionLength.max);
+  return `${content} ${fallback}`.replace(/\s+/g, " ").trim();
 }
 
 function buildFallbackTags(input: GenerateArticleMetadataInput["input"], fallbackTitle: string) {
@@ -227,12 +212,12 @@ export function parseGeneratedMetadata(
   const slug = rawSlug ? createSlug(rawSlug) : createSlug(title);
   const seoTitle =
     typeof source.seoTitle === "string" && source.seoTitle.trim()
-      ? clampTextLength(source.seoTitle.trim(), SEO_TARGETS.titleLength.max)
-      : clampTextLength(title, SEO_TARGETS.titleLength.max);
+      ? source.seoTitle.trim()
+      : title;
   const metaDescriptionSeed =
     typeof source.metaDescription === "string" && source.metaDescription.trim()
       ? source.metaDescription.trim()
-      : buildExcerpt(input.content, SEO_TARGETS.metaDescriptionLength.max);
+      : buildExcerpt(input.content);
   const metaDescription = ensureMinimumMetaDescription(
     metaDescriptionSeed,
     `${input.input.keyword} guide for ${input.input.targetAudience}.`
@@ -240,7 +225,7 @@ export function parseGeneratedMetadata(
   const excerpt =
     typeof source.excerpt === "string" && source.excerpt.trim()
       ? source.excerpt.trim()
-      : buildExcerpt(input.content, 220);
+      : buildExcerpt(input.content);
   const parsedTags = dedupeStrings(parseStringArray(source.tags, fallbackTags));
   const tags = (
     parsedTags.length >= SEO_TARGETS.minimumTags ? parsedTags : dedupeStrings([...parsedTags, ...fallbackTags])

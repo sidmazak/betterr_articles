@@ -29,9 +29,9 @@ Return ONLY valid JSON using this exact shape:
 {
   "title": "Final article title",
   "slug": "seo-friendly-url-slug",
-  "seoTitle": "SEO title under 60 characters",
-  "metaDescription": "Meta description under 160 characters",
-  "excerpt": "Short excerpt under 220 characters",
+  "seoTitle": "SEO title under 60-70 characters",
+  "metaDescription": "Meta description under 160-180 characters",
+  "excerpt": "Short excerpt between " + ${SEO_TARGETS.excerptLength.min} + " and " + ${SEO_TARGETS.excerptLength.max} + " characters",
   "tags": ["tag one", "tag two"],
   "category": "Best-fit content category",
   "coverImageAlt": "Descriptive alt text for the featured image",

@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Check, Code, Download, Share2, Sparkles } from "lucide-react";
 
 const ARTICLE_BODY_PROSE =
-  "prose prose-neutral max-w-none text-[16px] leading-8 text-foreground dark:prose-invert lg:text-[1.05rem] lg:leading-8 lg:prose-lg prose-p:my-5 prose-p:leading-8 prose-headings:scroll-mt-24 prose-headings:font-semibold prose-headings:tracking-tight prose-h1:mb-5 prose-h1:text-4xl prose-h2:mt-12 prose-h2:mb-5 prose-h2:text-3xl prose-h3:mt-10 prose-h3:mb-4 prose-h3:text-2xl prose-h4:mt-8 prose-h4:mb-3 prose-h4:text-xl prose-strong:font-semibold prose-li:my-2 prose-li:leading-8 prose-blockquote:border-l-sky-300 prose-table:w-full prose-table:border-collapse prose-table:overflow-x-auto prose-thead:border-b prose-th:border prose-th:border-border prose-th:bg-muted/50 prose-th:px-4 prose-th:py-3 prose-th:text-left prose-th:font-semibold prose-td:border prose-td:border-border prose-td:px-4 prose-td:py-3 prose-a:font-medium prose-a:text-blue-600 prose-a:underline prose-a:decoration-blue-600 hover:prose-a:text-blue-800 prose-img:rounded-xl prose-img:border";
+  "prose prose-neutral max-w-none wrap-break-word text-[16px] leading-8 text-foreground dark:prose-invert lg:text-[1.05rem] lg:leading-8 lg:prose-lg prose-p:my-5 prose-p:leading-8 prose-headings:scroll-mt-24 prose-headings:font-semibold prose-headings:tracking-tight prose-h1:mb-5 prose-h1:text-4xl prose-h2:mt-12 prose-h2:mb-5 prose-h2:text-3xl prose-h3:mt-10 prose-h3:mb-4 prose-h3:text-2xl prose-h4:mt-8 prose-h4:mb-3 prose-h4:text-xl prose-strong:font-semibold prose-li:my-2 prose-li:leading-8 prose-blockquote:border-l-sky-300 prose-table:w-full prose-table:border-collapse prose-table:overflow-x-auto prose-thead:border-b prose-th:border prose-th:border-border prose-th:bg-muted/50 prose-th:px-4 prose-th:py-3 prose-th:text-left prose-th:font-semibold prose-td:border prose-td:border-border prose-td:px-4 prose-td:py-3 prose-a:font-medium prose-a:text-blue-600 prose-a:underline prose-a:decoration-blue-600 hover:prose-a:text-blue-800 prose-img:rounded-xl prose-img:border";
 
 type PublicArticle = {
   id: string;
@@ -184,20 +184,20 @@ export default function PublicArticlePage() {
                 {article.category}
               </p>
             )}
-            <h1 className="text-4xl font-semibold tracking-tight text-foreground lg:text-5xl">
+            <h1 className="wrap-break-word text-4xl font-semibold tracking-tight text-foreground lg:text-5xl">
               {article.title}
             </h1>
             {article.excerpt && (
-              <p className="text-lg leading-8 text-muted-foreground">
+              <p className="wrap-break-word text-lg leading-8 text-muted-foreground">
                 {article.excerpt}
               </p>
             )}
             {article.tags.length > 0 && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex min-w-0 flex-wrap gap-2">
                 {article.tags.map((tag) => (
                   <span
                     key={tag}
-                    className="rounded-md border px-2 py-0.5 text-xs text-muted-foreground"
+                    className="max-w-full wrap-break-word rounded-md border px-2 py-0.5 text-xs text-muted-foreground"
                   >
                     {tag}
                   </span>

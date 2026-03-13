@@ -296,9 +296,11 @@ export default function CalendarPage() {
   );
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const [scheduleMenuOpen, setScheduleMenuOpen] = useState(false);
-  const [regenerateDialogOpen, setRegenerateDialogOpen] = useState(false);
-  const [regenerateFeedback, setRegenerateFeedback] = useState("");
   const [genAppend, setGenAppend] = useState(true);
+  const [regenerateDialogOpen, setRegenerateDialogOpen] = useState(false);
+  const [regenerateDialogItemId, setRegenerateDialogItemId] = useState<string | null>(null);
+  const [regenerateFeedback, setRegenerateFeedback] = useState("");
+  const [regeneratingItemId, setRegeneratingItemId] = useState<string | null>(null);
   const calendarEventSourceRef = useRef<EventSource | null>(null);
   const connectedCalendarJobIdRef = useRef<string | null>(null);
 
@@ -661,21 +663,6 @@ export default function CalendarPage() {
     .map((item) => item.suggested_date)
     .filter((date): date is string => typeof date === "string" && !!date)
     .sort();
-  const regenerateStartDate =
-    calendarJob?.start_date ?? scheduledDates[0] ?? todayDateValue;
-  const regenerateEndDate =
-    calendarJob?.end_date ?? scheduledDates[scheduledDates.length - 1] ?? todayDateValue;
-  const regenerateRangeLabel =
-    regenerateStartDate === regenerateEndDate
-      ? format(parseISO(regenerateStartDate), "MMMM d, yyyy")
-      : `${format(parseISO(regenerateStartDate), "MMM d, yyyy")} – ${format(parseISO(regenerateEndDate), "MMM d, yyyy")}`;
-  const regeneratePlannedCount = Math.max(
-    Math.ceil(
-      (new Date(regenerateEndDate).getTime() - new Date(regenerateStartDate).getTime()) /
-        (24 * 60 * 60 * 1000)
-    ) + 1,
-    1
-  );
   const futureScheduledDates = Array.from(
     new Set(
       items
@@ -791,16 +778,6 @@ export default function CalendarPage() {
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-          )}
-          {items.length > 0 && (
-            <Button
-              variant="outline"
-              disabled={loading || hasActiveCalendarJob}
-              onClick={() => setRegenerateDialogOpen(true)}
-            >
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Regenerate
-            </Button>
           )}
         </div>
       </div>
@@ -997,14 +974,16 @@ export default function CalendarPage() {
                                 items={dayItems}
                                 projectId={id}
                                 canPublish={hasPublishingPlatforms}
+                                regeneratingItemId={regeneratingItemId}
                                 onDelete={deleteItem}
                                 onSelect={(item) => {
                                   setSelectedItem(item);
                                   setSheetMode("view");
                                 }}
-                                onRegenerateSingle={(itemId) =>
-                                  regenerateCalendarItem({ itemId })
-                                }
+                                onRegenerateSingle={(itemId) => {
+                                  setRegenerateDialogItemId(itemId);
+                                  setRegenerateDialogOpen(true);
+                                }}
                               />
                             );
                           })}
@@ -1035,8 +1014,10 @@ export default function CalendarPage() {
           setSheetMode("view");
         }}
         onRegenerate={() => {
-          if (selectedItem) regenerateCalendarItem({ itemId: selectedItem.id });
-          setSelectedItem(null);
+          if (selectedItem) {
+            setRegenerateDialogItemId(selectedItem.id);
+            setRegenerateDialogOpen(true);
+          }
         }}
         onDelete={() => {
           if (selectedItem) deleteItem(selectedItem.id);
@@ -1044,6 +1025,63 @@ export default function CalendarPage() {
         }}
         projectId={id}
       />
+
+      <Dialog
+        open={regenerateDialogOpen}
+        onOpenChange={(open) => {
+          setRegenerateDialogOpen(open);
+          if (!open) {
+            setRegenerateDialogItemId(null);
+            setRegenerateFeedback("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Regenerate idea with AI</DialogTitle>
+            <DialogDescription>
+              AI will generate a new replacement for this idea. Add optional feedback below to steer the direction (e.g. &quot;focus on beginners&quot;, &quot;emphasize cost comparison&quot;).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="regen-feedback" className="text-sm">Feedback (optional)</Label>
+              <Textarea
+                id="regen-feedback"
+                placeholder="e.g. Focus on beginners, add cost comparison, make it more actionable..."
+                value={regenerateFeedback}
+                onChange={(e) => setRegenerateFeedback(e.target.value)}
+                className="min-h-[80px] resize-y"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRegenerateDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                const itemId = regenerateDialogItemId;
+                const feedback = regenerateFeedback?.trim() || undefined;
+                setRegenerateDialogOpen(false);
+                setRegenerateDialogItemId(null);
+                setRegenerateFeedback("");
+                if (itemId) {
+                  setRegeneratingItemId(itemId);
+                  setSelectedItem(null);
+                  try {
+                    await regenerateCalendarItem({ itemId, feedback });
+                  } finally {
+                    setRegeneratingItemId(null);
+                  }
+                }
+              }}
+            >
+              Regenerate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={generateDialogOpen} onOpenChange={setGenerateDialogOpen}>
         <DialogContent className="max-w-lg">
@@ -1212,67 +1250,6 @@ export default function CalendarPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <Dialog open={regenerateDialogOpen} onOpenChange={setRegenerateDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Regenerate the last generated schedule</DialogTitle>
-            <DialogDescription>
-              This will regenerate the same schedule window as the last generation run so the same batch of
-              ideas gets replaced together.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-muted-foreground">
-              <p>
-                Window: <span className="font-medium text-foreground">{regenerateRangeLabel}</span>
-              </p>
-              <p className="mt-1">
-                Planned ideas: <span className="font-medium text-foreground">{regeneratePlannedCount}</span>
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="regen-feedback" className="text-sm font-medium">
-                Optional feedback for AI
-              </Label>
-              <Textarea
-                id="regen-feedback"
-                placeholder="e.g. More how-to guides, fewer listicles, focus on X topic..."
-                value={regenerateFeedback}
-                onChange={(e) => setRegenerateFeedback(e.target.value)}
-                className="min-h-[80px] resize-y"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setRegenerateDialogOpen(false);
-                setRegenerateFeedback("");
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={async () => {
-                setRegenerateDialogOpen(false);
-                await startCalendarGenerationJob({
-                  wholeMonth: true,
-                  replace: true,
-                  startDate: regenerateStartDate,
-                  endDate: regenerateEndDate,
-                  feedback: regenerateFeedback || undefined,
-                });
-                setRegenerateFeedback("");
-              }}
-              disabled={loading || hasActiveCalendarJob}
-            >
-              {loading ? "Starting..." : "Confirm & regenerate"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -1283,6 +1260,7 @@ function CalendarCell({
   items,
   projectId,
   canPublish,
+  regeneratingItemId,
   onDelete,
   onSelect,
   onRegenerateSingle,
@@ -1292,6 +1270,7 @@ function CalendarCell({
   items: EnrichedCalendarItem[];
   projectId: string;
   canPublish: boolean;
+  regeneratingItemId: string | null;
   onDelete: (id: string) => void;
   onSelect: (item: EnrichedCalendarItem) => void;
   onRegenerateSingle: (itemId: string) => void;
@@ -1314,6 +1293,7 @@ function CalendarCell({
             item={item}
             projectId={projectId}
             canPublish={canPublish}
+            isRegenerating={item.id === regeneratingItemId}
             onDelete={() => onDelete(item.id)}
             onSelect={() => onSelect(item)}
             onRegenerateSingle={() => onRegenerateSingle(item.id)}
@@ -1328,6 +1308,7 @@ function ArticleCard({
   item,
   projectId,
   canPublish,
+  isRegenerating,
   onDelete,
   onSelect,
   onRegenerateSingle,
@@ -1335,6 +1316,7 @@ function ArticleCard({
   item: EnrichedCalendarItem;
   projectId: string;
   canPublish: boolean;
+  isRegenerating?: boolean;
   onDelete: () => void;
   onSelect: () => void;
   onRegenerateSingle: () => void;
@@ -1353,6 +1335,10 @@ function ArticleCard({
   return (
     <div
       className={`overflow-hidden rounded-lg border text-left shadow-sm transition-all hover:shadow-md ${
+        isRegenerating
+          ? "pointer-events-none opacity-50"
+          : ""
+      } ${
         statusVariant === "published"
           ? "border-emerald-500/40 bg-emerald-50/50 dark:bg-emerald-950/20 dark:border-emerald-500/30"
           : statusVariant === "written"
@@ -1901,30 +1887,48 @@ function ItemSheet({
           </p>
           <div className="flex flex-wrap gap-2">
           {mode === "view" ? (
-            <>
-              <Button onClick={onEdit}>
-                <Pencil className="mr-2 h-4 w-4" />
-                Edit
-              </Button>
-              {canRegenerate && (
-                <Button variant="outline" onClick={onRegenerate}>
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Regenerate with AI
+            written || published ? (
+              published && item.published_url ? (
+                <a href={item.published_url} target="_blank" rel="noopener noreferrer">
+                  <Button variant="secondary">
+                    <FileText className="mr-2 h-4 w-4" />
+                    View article
+                  </Button>
+                </a>
+              ) : (
+                <Link href={`/projects/${projectId}/articles/${item.article_id}`}>
+                  <Button variant="secondary">
+                    <FileText className="mr-2 h-4 w-4" />
+                    Open article
+                  </Button>
+                </Link>
+              )
+            ) : (
+              <>
+                <Button onClick={onEdit}>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit
                 </Button>
-              )}
-              <Link href={`/projects/${projectId}/write/${item.id}`}>
-                <Button variant="secondary">
-                  <FileText className="mr-2 h-4 w-4" />
-                  Write article
-                </Button>
-              </Link>
-              {canDelete && (
-                <Button variant="destructive" onClick={onDelete}>
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete
-                </Button>
-              )}
-            </>
+                {canRegenerate && (
+                  <Button variant="outline" onClick={onRegenerate}>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Regenerate with AI
+                  </Button>
+                )}
+                <Link href={`/projects/${projectId}/write/${item.id}`}>
+                  <Button variant="secondary">
+                    <FileText className="mr-2 h-4 w-4" />
+                    Write article
+                  </Button>
+                </Link>
+                {canDelete && (
+                  <Button variant="destructive" onClick={onDelete}>
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete
+                  </Button>
+                )}
+              </>
+            )
           ) : (
             <>
               <Button

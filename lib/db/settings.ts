@@ -33,6 +33,8 @@ export type ImageGenerationProvider =
   | "together"
   | "litellm"
   | "google"
+  | "stability"
+  | "horde"
   | "custom";
 
 export interface ImageGenerationSettings {
@@ -72,6 +74,11 @@ export function getAllLLMSettings(): LLMSettings[] {
   return db.prepare("SELECT * FROM llm_settings ORDER BY is_default DESC, updated_at DESC").all() as LLMSettings[];
 }
 
+function looksLikeModelId(s: string): boolean {
+  const t = s.trim();
+  return t.includes("/") || /::/.test(t) || /^[\w.-]+\/[\w.-]+$/i.test(t);
+}
+
 export function hasConfiguredDefaultLLM(): boolean {
   return hasConfiguredLLMSettings(getLLMSettings());
 }
@@ -83,12 +90,16 @@ export function getImageGenerationSettings(): ImageGenerationSettings | null {
   try {
     const parsed = JSON.parse(raw) as Partial<ImageGenerationSettings>;
     if (!parsed.provider || !parsed.model) return null;
+    let stylePrompt = parsed.style_prompt ?? null;
+    if (stylePrompt && looksLikeModelId(stylePrompt)) {
+      stylePrompt = null;
+    }
     return {
       provider: parsed.provider,
       api_key: parsed.api_key ?? null,
       model: parsed.model,
       base_url: parsed.base_url ?? null,
-      style_prompt: parsed.style_prompt ?? null,
+      style_prompt: stylePrompt,
       enabled: parsed.enabled === 0 ? 0 : 1,
     };
   } catch {
@@ -98,12 +109,9 @@ export function getImageGenerationSettings(): ImageGenerationSettings | null {
 
 export function isImageGenerationConfigured(): boolean {
   const settings = getImageGenerationSettings();
-  return !!(
-    settings &&
-    settings.enabled !== 0 &&
-    settings.api_key?.trim() &&
-    settings.model?.trim()
-  );
+  if (!settings || settings.enabled === 0 || !settings.model?.trim()) return false;
+  if (settings.provider === "horde") return true;
+  return !!settings.api_key?.trim();
 }
 
 export function saveImageGenerationSettings(
@@ -115,7 +123,10 @@ export function saveImageGenerationSettings(
     api_key: settings.api_key ?? current?.api_key ?? null,
     model: settings.model,
     base_url: settings.base_url ?? current?.base_url ?? null,
-    style_prompt: settings.style_prompt ?? current?.style_prompt ?? null,
+    style_prompt: (() => {
+      const v = settings.style_prompt ?? current?.style_prompt ?? null;
+      return v && !looksLikeModelId(v) ? v : null;
+    })(),
     enabled: settings.enabled === 0 ? 0 : 1,
   };
 

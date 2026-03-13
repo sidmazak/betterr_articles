@@ -123,12 +123,33 @@ function getBackgroundVariant(chartType: string): string {
   return BACKGROUND_VARIANTS[idx >= 0 ? idx % BACKGROUND_VARIANTS.length : 0];
 }
 
-function escapeHtml(s: string): string {
+/** Decode HTML entities so &amp; etc. display correctly. React escapes on render. */
+/** Decode HTML entities so &amp; etc. display correctly. React escapes on render. */
+function decodeHtmlEntities(s: string): string {
   return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, "\u00A0")
+    .replace(/&mdash;/g, "\u2014")
+    .replace(/&ndash;/g, "\u2013")
+    .replace(/&hellip;/g, "\u2026")
+    .replace(/&lsquo;/g, "\u2018")
+    .replace(/&rsquo;/g, "\u2019")
+    .replace(/&ldquo;/g, "\u201C")
+    .replace(/&rdquo;/g, "\u201D")
+    .replace(/&bull;/g, "\u2022")
+    .replace(/&middot;/g, "\u00B7")
+    .replace(/&deg;/g, "\u00B0")
+    .replace(/&plusmn;/g, "\u00B1")
+    .replace(/&copy;/g, "\u00A9")
+    .replace(/&reg;/g, "\u00AE")
+    .replace(/&trade;/g, "\u2122")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(parseInt(n, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCodePoint(parseInt(n, 16)));
 }
 
 /** Resolve icon from hint or infer from label/value text */
@@ -181,7 +202,7 @@ function renderSectionBlock(
       return (
         <div key={section.title} style={{ padding: "24px 32px 8px", fontFamily }}>
           <h4 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: "-0.02em" }}>
-            {escapeHtml(section.title)}
+            {decodeHtmlEntities(section.title)}
           </h4>
         </div>
       );
@@ -190,7 +211,7 @@ function renderSectionBlock(
       if (!section.content) return null;
       return (
         <div key={section.content.slice(0, 20)} style={{ padding: "8px 32px 16px", fontFamily }}>
-          <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: "#94a3b8" }}>{escapeHtml(section.content)}</p>
+          <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: "#94a3b8" }}>{decodeHtmlEntities(section.content)}</p>
         </div>
       );
     }
@@ -211,7 +232,7 @@ function renderSectionBlock(
             return (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", background: `${color}18`, borderRadius: 10, border: `1px solid ${color}44` }}>
                 <Icon size={20} color={color} />
-                <span style={{ fontWeight: 600, color: "#e2e8f0", fontSize: 14 }}>{it.label}</span>
+                <span style={{ fontWeight: 600, color: "#e2e8f0", fontSize: 14 }}>{decodeHtmlEntities(it.label)}</span>
               </div>
             );
           })}
@@ -236,7 +257,7 @@ function renderSectionBlock(
             return (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 18px", background: `${color}18`, borderRadius: 12, border: `1px solid ${color}44` }}>
                 <Icon size={22} color={color} />
-                <span style={{ fontWeight: 600, color: "#e2e8f0", fontSize: 14 }}>{it.label}</span>
+                <span style={{ fontWeight: 600, color: "#e2e8f0", fontSize: 14 }}>{decodeHtmlEntities(it.label)}</span>
               </div>
             );
           })}
@@ -255,14 +276,14 @@ function renderSectionBlock(
           <div style={{ flex: 1, padding: 16, background: `${goodColor}15`, borderRadius: 12, border: `1px solid ${goodColor}44`, display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <GoodIcon size={24} color={goodColor} />
-              <span style={{ fontWeight: 700, color: goodColor, fontSize: 15 }}>{pair.good.label}</span>
+              <span style={{ fontWeight: 700, color: goodColor, fontSize: 15 }}>{decodeHtmlEntities(pair.good.label)}</span>
             </div>
             {pair.good.value != null && <span style={{ fontSize: 13, color: "#94a3b8" }}>{String(pair.good.value)}</span>}
           </div>
           <div style={{ flex: 1, padding: 16, background: `${badColor}15`, borderRadius: 12, border: `1px solid ${badColor}44`, display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <BadIcon size={24} color={badColor} />
-              <span style={{ fontWeight: 700, color: badColor, fontSize: 15 }}>{pair.bad.label}</span>
+              <span style={{ fontWeight: 700, color: badColor, fontSize: 15 }}>{decodeHtmlEntities(pair.bad.label)}</span>
             </div>
             {pair.bad.value != null && <span style={{ fontSize: 13, color: "#94a3b8" }}>{String(pair.bad.value)}</span>}
           </div>
@@ -275,9 +296,9 @@ function renderSectionBlock(
       const color = st.category ? SEMANTIC_COLORS[st.category] : COLORS[0];
       return (
         <div key="status" style={{ padding: "16px 32px", fontFamily, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          {section.title && <span style={{ fontSize: 14, color: "#94a3b8" }}>{section.title}</span>}
+          {section.title && <span style={{ fontSize: 14, color: "#94a3b8" }}>{decodeHtmlEntities(section.title)}</span>}
           <span style={{ padding: "6px 14px", borderRadius: 8, background: `${color}22`, border: `1px solid ${color}44`, fontWeight: 700, color, fontSize: 13 }}>
-            {st.label}: {st.value}
+            {decodeHtmlEntities(st.label)}: {st.value}
           </span>
         </div>
       );
@@ -287,7 +308,7 @@ function renderSectionBlock(
       if (items.length === 0) return null;
       return (
         <div key="list" style={{ padding: "16px 32px", fontFamily }}>
-          {section.title && <h5 style={{ margin: "0 0 12px", fontSize: 15, fontWeight: 600, color: "#e2e8f0" }}>{section.title}</h5>}
+          {section.title && <h5 style={{ margin: "0 0 12px", fontSize: 15, fontWeight: 600, color: "#e2e8f0" }}>{decodeHtmlEntities(section.title)}</h5>}
           <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
             {items.map((item, i) => {
               const Icon = resolveIcon(item.icon, item.label, item.value);
@@ -297,7 +318,7 @@ function renderSectionBlock(
                   <div style={{ width: 32, height: 32, borderRadius: 8, background: `${color}22`, border: `1px solid ${color}44`, display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <Icon size={16} color={color} />
                   </div>
-                  <span style={{ fontWeight: 500, color: "#e2e8f0", fontSize: 14 }}>{item.label}</span>
+                  <span style={{ fontWeight: 500, color: "#e2e8f0", fontSize: 14 }}>{decodeHtmlEntities(item.label)}</span>
                   {item.value != null && <span style={{ marginLeft: 8, color: "#94a3b8", fontSize: 13 }}>{String(item.value)}</span>}
                 </div>
               );
@@ -311,7 +332,7 @@ function renderSectionBlock(
       if (rows.length === 0) return null;
       return (
         <div key="comparison" style={{ padding: "16px 32px", fontFamily }}>
-          {section.title && <h5 style={{ margin: "0 0 12px", fontSize: 15, fontWeight: 600, color: "#e2e8f0" }}>{section.title}</h5>}
+          {section.title && <h5 style={{ margin: "0 0 12px", fontSize: 15, fontWeight: 600, color: "#e2e8f0" }}>{decodeHtmlEntities(section.title)}</h5>}
           <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
             {rows.map((row, i) => {
               const accentColor = row[0]?.category ? SEMANTIC_COLORS[row[0].category] : COLORS[i % COLORS.length];
@@ -325,7 +346,7 @@ function renderSectionBlock(
                       return (
                         <div key={j} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
                           <Icon size={16} color={color} />
-                          <span style={{ color: "#94a3b8" }}>{c.label}</span>
+                          <span style={{ color: "#94a3b8" }}>{decodeHtmlEntities(c.label)}</span>
                           <span style={{ fontWeight: 600, color }}>{String(c.value)}</span>
                         </div>
                       );
@@ -341,11 +362,11 @@ function renderSectionBlock(
     case "bar": {
       const labels = section.labels ?? [];
       const values = section.values ?? [];
-      const data = labels.map((l, i) => ({ name: l, value: values[i] ?? 0 }));
+      const data = labels.map((l, i) => ({ name: decodeHtmlEntities(l), value: values[i] ?? 0 }));
       if (data.length === 0) return null;
       return (
         <div key="bar" style={{ padding: "16px 24px", fontFamily }}>
-          {section.title && <h5 style={{ margin: "0 0 12px", fontSize: 15, fontWeight: 600, color: "#e2e8f0" }}>{section.title}</h5>}
+          {section.title && <h5 style={{ margin: "0 0 12px", fontSize: 15, fontWeight: 600, color: "#e2e8f0" }}>{decodeHtmlEntities(section.title)}</h5>}
           <ResponsiveContainer width="100%" height={320}>
             <BarChart data={data} margin={{ top: 8, right: 16, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
@@ -360,11 +381,11 @@ function renderSectionBlock(
     case "pie": {
       const labels = section.labels ?? [];
       const values = section.values ?? [];
-      const data = labels.map((l, i) => ({ name: l, value: values[i] ?? 0 }));
+      const data = labels.map((l, i) => ({ name: decodeHtmlEntities(l), value: values[i] ?? 0 }));
       if (data.length === 0) return null;
       return (
         <div key="pie" style={{ padding: "16px 24px", fontFamily }}>
-          {section.title && <h5 style={{ margin: "0 0 12px", fontSize: 15, fontWeight: 600, color: "#e2e8f0" }}>{section.title}</h5>}
+          {section.title && <h5 style={{ margin: "0 0 12px", fontSize: 15, fontWeight: 600, color: "#e2e8f0" }}>{decodeHtmlEntities(section.title)}</h5>}
           <ResponsiveContainer width="100%" height={280}>
             <PieChart>
               <Pie
@@ -410,7 +431,7 @@ function InfographicChart({ spec }: { spec: InfographicSpec }) {
       case "bar": {
         const { labels = [], values = [] } = spec.data;
         const data = labels.map((label, i) => ({
-          name: label,
+          name: decodeHtmlEntities(label),
           value: values[i] ?? 0,
         }));
         return (
@@ -437,7 +458,7 @@ function InfographicChart({ spec }: { spec: InfographicSpec }) {
       case "pie": {
         const { labels = [], values = [] } = spec.data;
         const data = labels.map((label, i) => ({
-          name: label,
+          name: decodeHtmlEntities(label),
           value: values[i] ?? 0,
         }));
         return (
@@ -521,7 +542,7 @@ function InfographicChart({ spec }: { spec: InfographicSpec }) {
                             }}
                           >
                             <Icon size={18} color={color} style={{ flexShrink: 0, opacity: 0.9 }} />
-                            <span style={{ color: "#94a3b8" }}>{c.label}</span>
+                            <span style={{ color: "#94a3b8" }}>{decodeHtmlEntities(c.label)}</span>
                             <span style={{ fontWeight: 600, color, minWidth: 0 }}>{String(c.value)}</span>
                           </div>
                         );
@@ -584,7 +605,7 @@ function InfographicChart({ spec }: { spec: InfographicSpec }) {
                     <Icon size={18} color={color} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ fontWeight: 600, color: "#e2e8f0", fontSize: 15 }}>{item.label}</span>
+                    <span style={{ fontWeight: 600, color: "#e2e8f0", fontSize: 15 }}>{decodeHtmlEntities(item.label)}</span>
                     {val != null && (
                       <span style={{ marginLeft: 10, color: "#94a3b8", fontSize: 14 }}>{String(val)}</span>
                     )}
@@ -645,12 +666,12 @@ function InfographicChart({ spec }: { spec: InfographicSpec }) {
             <HeaderIcon size={22} color={headerIconColor} />
           </div>
           <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700, lineHeight: 1.3, color: "#fff", letterSpacing: "-0.02em" }}>
-            {escapeHtml(spec.title)}
+            {decodeHtmlEntities(spec.title)}
           </h3>
         </div>
         {spec.subtitle && (
           <p style={{ margin: "0 0 0 54px", fontSize: 14, color: "#06b6d4", fontWeight: 500 }}>
-            {escapeHtml(spec.subtitle)}
+            {decodeHtmlEntities(spec.subtitle)}
           </p>
         )}
       </div>

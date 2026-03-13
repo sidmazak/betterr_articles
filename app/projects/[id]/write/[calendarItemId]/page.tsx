@@ -23,6 +23,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
 import type { Project } from "@/lib/db";
 import type { CalendarItemRow } from "@/lib/db";
@@ -307,6 +308,7 @@ export default function WritePage() {
   const [readingLevel, setReadingLevel] = useState<ArticlePipelineInput["readingLevel"]>("Intermediate");
   const [articleType, setArticleType] = useState<ArticlePipelineInput["articleType"] | "_any">("_any");
   const [internalLinking, setInternalLinking] = useState(true);
+  const [customInstructions, setCustomInstructions] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [generationStepIndex, setGenerationStepIndex] = useState(0);
@@ -412,6 +414,7 @@ export default function WritePage() {
         if (cleanDefaults.readingLevel) setReadingLevel(cleanDefaults.readingLevel);
         if (cleanDefaults.articleType) setArticleType(cleanDefaults.articleType as ArticlePipelineInput["articleType"]);
         if (cleanDefaults.internalLinking !== undefined) setInternalLinking(cleanDefaults.internalLinking);
+        if (cleanDefaults.customInstructions) setCustomInstructions(cleanDefaults.customInstructions);
       })
       .catch(() => setProjectDefaults({}));
   }, [projectId]);
@@ -818,7 +821,7 @@ export default function WritePage() {
 
       if (finalResult?.articleId) {
         setArticleId(finalResult.articleId);
-        router.push(`/projects/${projectId}/articles/${finalResult.articleId}?tab=score`);
+        router.push(`/projects/${projectId}/articles/${finalResult.articleId}`);
       }
     } catch (err) {
       if (err instanceof Error && (err.name === "AbortError" || err.message?.includes("abort"))) {
@@ -879,7 +882,9 @@ export default function WritePage() {
             ? { articleType }
             : {})),
         ...(projectDefaults.geoFocus ? { geoFocus: projectDefaults.geoFocus } : {}),
-        ...(projectDefaults.customInstructions ? { customInstructions: projectDefaults.customInstructions } : {}),
+        ...((customInstructions?.trim() || projectDefaults.customInstructions)
+          ? { customInstructions: (customInstructions?.trim() || projectDefaults.customInstructions) ?? undefined }
+          : {}),
         ...(projectDefaults.domainKnowledge ? { domainKnowledge: projectDefaults.domainKnowledge } : {}),
         ...(calendarItem.secondary_keywords
           ? {
@@ -1158,6 +1163,19 @@ export default function WritePage() {
               <div className="flex items-center justify-between rounded-lg border border-border px-4 py-2.5 sm:col-span-2">
                 <Label htmlFor="internal" className="text-xs font-medium">Internal linking</Label>
                 <Switch id="internal" checked={internalLinking} onCheckedChange={setInternalLinking} />
+              </div>
+              <div className="space-y-2 sm:col-span-2 lg:col-span-4">
+                <Label htmlFor="custom-instructions" className="text-xs">Custom instructions</Label>
+                <Textarea
+                  id="custom-instructions"
+                  placeholder="e.g. Use bullet points for key takeaways, include a comparison table, focus on beginner-friendly explanations..."
+                  value={customInstructions}
+                  onChange={(e) => setCustomInstructions(e.target.value)}
+                  className="min-h-[80px] resize-y"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Optional. Extra guidance for this article. Merged with project defaults if set.
+                </p>
               </div>
             </div>
           </CollapsibleContent>

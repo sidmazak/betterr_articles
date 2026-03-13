@@ -34,7 +34,9 @@ export async function POST(
         : "Professional editorial featured image");
     const prompt = rawPrompt.slice(0, 500);
 
+    console.log(`[Cover image] Generating for article ${articleId}, prompt length=${prompt.length}`);
     const generated = await generateArticleImage(prompt);
+    console.log(`[Cover image] ${generated ? "Success" : "No result"}`);
     if (!generated) {
       return NextResponse.json(
         { error: "Image generation returned no result. Check Settings → Image configuration." },

@@ -42,6 +42,7 @@ export const SEO_RULE_CATEGORIES: SeoCategoryDefinition[] = [
 export const SEO_TARGETS = {
   titleLength: { min: 45, max: 100 },
   metaDescriptionLength: { min: 120, max: 160 },
+  excerptLength: { min: 120, max: 220 },
   keywordDensity: { min: 0.5, max: 1.5 },
   minimumWordCount: 1500,
   minimumTags: 4,

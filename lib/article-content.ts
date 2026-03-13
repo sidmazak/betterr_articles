@@ -43,6 +43,7 @@ export function cleanArticleMarkdown(content: string) {
     content
       .replace(/\n```html\s*$/gi, "\n")
       .replace(/\n\d+\s*$/g, "\n")
+      .replace(/(?<!\]\()\s*\(#infographic-[a-z0-9_-]+\)\s*/gi, " ")
       .trim()
   );
 }
