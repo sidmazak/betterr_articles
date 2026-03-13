@@ -27,6 +27,8 @@
 *.db-shm
 *.db-wal
 /data
+./data
+/data/*
 
 # misc
 .DS_Store
